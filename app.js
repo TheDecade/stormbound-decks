@@ -63,7 +63,7 @@ function renderList() {
         const kt = `${ka}/${t}`;
         h += `<details data-k="${esc(kt)}" ${openKeys.has(kt) ? "open" : ""}><summary>${esc(t)}<span class="cnt">${g[f][a][t].length}</span></summary>`;
         for (const d of g[f][a][t].sort((x, y) => y.updated - x.updated)) {
-          h += `<div class="deckrow" data-id="${d.id}"><span class="nm">${esc(d.name || "Untitled")}</span>
+          h += `<div class="deckrow" data-id="${d.id}"><span class="nm">${d.saved === false ? "Unsaved draft" : esc(d.name || "Untitled")}</span>
             <span class="meta ${d.cards.length === DECK_SIZE ? "full" : ""}">${d.cards.length}/${DECK_SIZE}</span></div>`;
         }
         h += `</details>`;
@@ -75,7 +75,7 @@ function renderList() {
   h += `<div class="footer-tools"><button id="exp">Export backup</button><button id="imp">Import backup</button></div></div>
     <button class="primary fab" id="new">+ New deck</button>`;
   $("#app").innerHTML = h;
-  $("#new").onclick = () => deckDialog();
+  $("#new").onclick = pickFaction;
   $("#exp").onclick = exportBackup;
   $("#imp").onclick = importBackup;
   $("#app").querySelectorAll("details").forEach(el => el.addEventListener("toggle", () => {
@@ -133,19 +133,31 @@ function combo(host, { value, options, placeholder, onChange }) {
 }
 const uniq = a => [...new Set(a.filter(x => x && x !== "—"))].sort((x, y) => x.localeCompare(y));
 
-/* ---------- new / edit deck dialog ---------- */
+/* ---------- new deck: faction only ---------- */
+function pickFaction() {
+  const o = openModal(`<div class="modal"><h2>New deck – choose faction</h2><div class="factions">
+    ${Object.entries(FACTIONS).map(([k, n]) => `<button type="button" class="f-${k}" data-f="${k}">${n}</button>`).join("")}</div>
+    <div class="actions"><button id="cancel">Cancel</button></div></div>`);
+  $("#cancel").onclick = closeModal;
+  o.querySelectorAll("[data-f]").forEach(b => b.onclick = () => {
+    const d = { id: uid(), name: "", faction: b.dataset.f, archetype: "", type: "", cards: [], saved: false, updated: Date.now() };
+    state.decks.push(d); save(); closeModal(); location.hash = "#/deck/" + d.id;
+  });
+}
+
+/* ---------- save / edit deck details dialog ---------- */
 function deckDialog(deck) {
-  const isNew = !deck;
-  const v = deck ? { ...deck } : { faction: "", name: "", archetype: "", type: "" };
-  const o = openModal(`<div class="modal"><h2>${isNew ? "New deck" : "Deck details"}</h2>
+  const isNew = false, draft = deck.saved === false;
+  const v = { ...deck };
+  const o = openModal(`<div class="modal"><h2>${draft ? "Save deck" : "Deck details"}</h2>
     <div class="field"><label>Faction</label><div class="factions">
       ${Object.entries(FACTIONS).map(([k, n]) => `<button type="button" class="f-${k} ${v.faction === k ? "sel" : ""}" data-f="${k}">${n}</button>`).join("")}
     </div></div>
     <div class="field"><label>Nickname</label><input id="dn" autocomplete="off" placeholder="e.g. Goat spam" value="${esc(v.name)}"></div>
     <div class="field"><label>Archetype</label><div id="ca"></div></div>
     <div class="field"><label>Type</label><div id="ct"></div></div>
-    <div class="actions">${isNew ? "" : `<button class="danger" id="del" style="margin-right:auto">Delete</button>`}
-      <button id="cancel">Cancel</button><button class="primary" id="ok">${isNew ? "Create" : "Save"}</button></div></div>`);
+    <div class="actions"><button class="danger" id="del" style="margin-right:auto">Delete</button>
+      <button id="cancel">Cancel</button><button class="primary" id="ok">Save</button></div></div>`);
   o.querySelectorAll("[data-f]").forEach(b => b.onclick = () => {
     v.faction = b.dataset.f;
     o.querySelectorAll("[data-f]").forEach(x => x.classList.toggle("sel", x === b));
@@ -156,7 +168,7 @@ function deckDialog(deck) {
   combo($("#ct"), { value: v.type, placeholder: "Pick or create type…", onChange: x => v.type = x,
     options: () => { const same = uniq(others("type", d => d.faction === v.faction && (d.archetype || "") === (v.archetype || ""))); return same.concat(uniq(others("type", () => true)).filter(a => !same.includes(a))); } });
   $("#cancel").onclick = closeModal;
-  if (!isNew) $("#del").onclick = () => {
+  $("#del").onclick = () => {
     if (confirm(`Delete “${deck.name || "Untitled"}”?`)) { state.decks = state.decks.filter(d => d !== deck); save(); closeModal(); location.hash = "#/"; renderList(); }
   };
   $("#ok").onclick = () => {
@@ -169,10 +181,10 @@ function deckDialog(deck) {
     } else {
       deck.cards = deck.cards.filter(c => BYID[c].faction === "neutral" || BYID[c].faction === v.faction);
       Object.assign(deck, { name: v.name, faction: v.faction, archetype: v.archetype.trim(), type: v.type.trim() });
-      deck.updated = Date.now(); save(); closeModal(); renderEditor(deck.id);
+      deck.saved = true; deck.updated = Date.now(); save(); closeModal(); renderEditor(deck.id); if (draft) toast("Deck saved");
     }
   };
-  if (isNew) setTimeout(() => $("#dn").focus(), 50);
+  if (draft) setTimeout(() => $("#dn").focus(), 50);
 }
 
 /* ---------- editor ---------- */
@@ -195,7 +207,8 @@ function renderEditor(id) {
   $("#app").innerHTML = `
     <div class="bar f-${deck.faction}">
       <button class="ghost" id="back">‹ Decks</button>
-      <h1 id="title"><span class="dot"></span>${esc(deck.name)} <span class="sub">${FACTIONS[deck.faction]}${sub ? " · " + esc(sub) : ""} ✎</span></h1>
+      <h1 id="title"><span class="dot"></span>${deck.saved === false ? "New deck" : esc(deck.name)} <span class="sub">${FACTIONS[deck.faction]}${sub ? " · " + esc(sub) : ""} ✎</span></h1>
+      <button class="primary" id="savebtn">${deck.saved === false ? "Save" : "Details"}</button>
       <div class="tabs"><button id="tcards">Cards</button><button id="tdeck">Deck <span id="cnt1"></span></button></div>
     </div>
     <div class="editor ${ui.tab === "deck" ? "showdeck" : ""}">
@@ -208,7 +221,8 @@ function renderEditor(id) {
         <div class="curve" id="curve"></div><div class="dlist" id="dlist"></div></div>
     </div>`;
   const q = $("#q");
-  $("#back").onclick = () => { location.hash = "#/"; };
+  $("#back").onclick = () => { if (deck.saved === false && !deck.cards.length) { state.decks = state.decks.filter(d => d !== deck); save(); } location.hash = "#/"; };
+  $("#savebtn").onclick = () => deckDialog(deck);
   $("#title").onclick = () => deckDialog(deck);
   q.addEventListener("input", () => { ui.search = q.value; drawGrid(deck); });
   $(".chips").onclick = e => { const b = e.target.closest("[data-k]"); if (!b) return; ui.kind = b.dataset.k; $(".chips").querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); drawGrid(deck); };

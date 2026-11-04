@@ -1,4 +1,4 @@
-const V = "sbd-v1";
+const V = "sbd-v2";
 const CORE = ["./", "index.html", "style.css", "app.js", "cards.json", "manifest.webmanifest", "icon-192.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(V).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => {
