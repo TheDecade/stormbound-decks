@@ -29,8 +29,9 @@ function toast(msg) {
 /* ---------- routing ---------- */
 function route() {
   if (location.hash === "#/tools") return renderTools();
-  const m = location.hash.match(/^#\/deck\/(.+)$/);
-  if (m && state.decks.find(d => d.id === m[1])) renderEditor(m[1]); else renderList();
+  const m = location.hash.match(/^#\/deck\/([^/]+)(\/edit)?$/);
+  const d = m && state.decks.find(x => x.id === m[1]);
+  if (d) { if (m[2] || d.saved === false) renderEditor(d.id); else renderView(d.id); } else renderList();
 }
 window.addEventListener("hashchange", () => { closeModal(); route(); });
 
@@ -85,7 +86,7 @@ function renderList() {
     el.open ? openKeys.add(el.dataset.k) : openKeys.delete(el.dataset.k);
     sessionStorage.setItem("sb-open", JSON.stringify([...openKeys]));
   }));
-  $("#app").onclick = e => { const r = e.target.closest(".deckrow"); if (r) location.hash = "#/deck/" + r.dataset.id; };
+  $("#app").onclick = e => { const r = e.target.closest(".deckrow"); if (r) location.hash = "#/deck/" + r.dataset.id; };  // a saved deck opens its view, a draft the editor (see route)
 }
 
 /* ---------- export for the PC: deck files in the convention of the Stormbound project's data/decks ---------- */
@@ -239,7 +240,7 @@ function deckDialog(deck) {
     } else {
       deck.cards = deck.cards.filter(c => BYID[c].faction === "neutral" || BYID[c].faction === v.faction);
       Object.assign(deck, { name: v.name, faction: v.faction, archetype: v.archetype.trim(), type: v.type.trim() });
-      deck.saved = true; deck.updated = Date.now(); save(); closeModal(); renderEditor(deck.id); if (draft) toast("Deck saved");
+      deck.saved = true; deck.updated = Date.now(); save(); closeModal(); if (draft) { toast("Deck saved"); location.hash = "#/deck/" + deck.id; } else route();
     }
   };
   if (draft) setTimeout(() => $("#dn").focus(), 50);
@@ -264,7 +265,7 @@ function renderEditor(id) {
   const sub = [deck.archetype, deck.type].filter(Boolean).join(" · ");
   $("#app").innerHTML = `
     <div class="bar f-${deck.faction}">
-      <button class="ghost" id="back">‹ Decks</button>
+      <button class="ghost" id="back">‹ ${deck.saved === false ? "Decks" : "Deck"}</button>
       <h1 id="title"><span class="dot"></span>${deck.saved === false ? "New deck" : esc(deck.name)} <span class="sub">${FACTIONS[deck.faction]}${sub ? " · " + esc(sub) : ""} ✎</span></h1>
       <button class="primary" id="savebtn">${deck.saved === false ? "Save" : "Details"}</button>
       <div class="tabs"><button id="tcards">Cards</button><button id="tdeck">Deck <span id="cnt1"></span></button></div>
@@ -279,7 +280,10 @@ function renderEditor(id) {
         <div class="curve" id="curve"></div><div class="dlist" id="dlist"></div></div>
     </div>`;
   const q = $("#q");
-  $("#back").onclick = () => { if (deck.saved === false && !deck.cards.length) { state.decks = state.decks.filter(d => d !== deck); save(); } location.hash = "#/"; };
+  $("#back").onclick = () => {
+    if (deck.saved === false && !deck.cards.length) { state.decks = state.decks.filter(d => d !== deck); save(); }
+    location.hash = deck.saved === false ? "#/" : "#/deck/" + deck.id;
+  };
   $("#savebtn").onclick = () => deckDialog(deck);
   $("#title").onclick = () => deckDialog(deck);
   q.addEventListener("input", () => { ui.search = q.value; drawGrid(deck); });
@@ -350,13 +354,44 @@ function wireDeckList(deck) {
   });
 }
 
-function preview(deck, id) {
+function preview(deck, id, ro) {
   const c = BYID[id], inDeck = deck.cards.includes(id);
   const o = openModal(`<div class="preview"><img src="${full(c)}" alt="${esc(c.name)}">
     <div class="txt">${esc(c.name)} · ${c.mana} mana · ${c.rarity}${c.units.length ? " · " + esc(c.units.join(", ")) : ""}</div>
-    <div class="pc"><button id="pc">Close</button><button class="primary" id="pa">${inDeck ? "Remove from deck" : "Add to deck"}</button></div></div>`);
+    <div class="pc"><button id="pc">Close</button>${ro ? "" : `<button class="primary" id="pa">${inDeck ? "Remove from deck" : "Add to deck"}</button>`}</div></div>`);
   $("#pc", o).onclick = closeModal;
-  $("#pa", o).onclick = () => { closeModal(); toggleCard(deck, id); };
+  if (!ro) $("#pa", o).onclick = () => { closeModal(); toggleCard(deck, id); };
+}
+
+/* ---------- deck view (like the Stormbound decks web page) ---------- */
+function renderView(id) {
+  const deck = state.decks.find(d => d.id === id);
+  const cs = deck.cards.map(i => BYID[i]).sort((a, b) => a.mana - b.mana || a.name.localeCompare(b.name));
+  const units = cs.filter(c => c.type === "unit"), structs = cs.filter(c => c.type === "structure"), spells = cs.filter(c => c.type === "spell");
+  const sum = (a, f) => a.reduce((t, c) => t + (f(c) || 0), 0);
+  const unitStr = sum(units, c => c.str), n = cs.length;
+  const curve = Array(9).fill(0); cs.forEach(c => curve[Math.min(c.mana, 8)]++);
+  const mx = Math.max(1, ...curve);
+  const rar = {}; cs.forEach(c => rar[c.rarity] = (rar[c.rarity] || 0) + 1);
+  const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
+  $("#app").innerHTML = `
+    <div class="bar f-${deck.faction}"><button class="ghost" id="back">‹ Decks</button><h1>${esc(deck.name || "Untitled")}</h1>
+      <button id="vdet">Details</button><button class="primary" id="vedit">Edit cards</button></div>
+    <div class="scroll vview">
+      <div class="badges f-${deck.faction}"><span class="fbadge">${FACTIONS[deck.faction]}</span>${deck.archetype ? `<span class="badge">${esc(deck.archetype)}</span>` : ""}${deck.type ? `<span class="badge">${esc(deck.type)}</span>` : ""}
+        <span class="badge ${n === DECK_SIZE ? "ok" : ""}">${n}/${DECK_SIZE} cards</span></div>
+      ${n ? `<div class="vgrid">${cs.map(c => `<div class="pcard" data-id="${c.id}"><div class="pimg"><img width="256" height="256" src="${thumb(c)}" alt=""><span class="cm">${c.mana}</span>${c.str != null ? `<span class="cs">${c.str}</span>` : ""}${c.spd ? `<span class="cv">${c.spd}</span>` : ""}<span class="cn">${esc(c.name)}<small>${esc(c.units.length ? c.units.join(", ") : c.type)}</small></span></div></div>`).join("")}</div>`
+        : `<div class="empty">No cards yet.<br>Tap <b>Edit cards</b> to add some.</div>`}
+      <div class="vcols"><div><h3>Statistics</h3><div class="stats">
+        ${stat(n ? (sum(cs, c => c.mana) / n).toFixed(2) : "–", "average mana")}${stat(units.length, "units")}${stat(spells.length, "spells")}${stat(structs.length, "structures")}
+        ${stat(unitStr, "unit strength (total)")}${stat(units.length ? Math.round(unitStr / units.length) : 0, "strength per unit")}${stat(units.filter(c => c.spd >= 2).length, "fast units (speed 2+)")}${stat(sum(structs, c => c.str), "structure strength")}</div></div>
+        <div><h3>Mana curve</h3><div class="vcurve">${curve.map((b, i) => `<div><i style="height:${b / mx * 100}%"></i><em>${b || ""}</em><span>${i === 8 ? "8+" : i}</span></div>`).join("")}</div>
+        <p class="hint left">Rarity: ${Object.entries(rar).map(([k, v]) => `${v} ${k}`).join(", ") || "–"}</p></div></div>
+    </div>`;
+  $("#back").onclick = () => { location.hash = "#/"; };
+  $("#vedit").onclick = () => { location.hash = "#/deck/" + deck.id + "/edit"; };
+  $("#vdet").onclick = () => deckDialog(deck);
+  $(".vgrid")?.addEventListener("click", e => { const c = e.target.closest("[data-id]"); if (c) preview(deck, c.dataset.id, true); });
 }
 
 /* ---------- boot ---------- */

@@ -201,3 +201,29 @@ details>summary{padding:8px 0;font-weight:600;color:var(--muted)}
 .pcard .cv{right:4px;background:#2d6fd0}
 .pcard .cn small{display:block;font-weight:400;color:#cbd2f0;font-size:9px}
 .pcard .cn{padding-bottom:3px}
+
+/* deck view */
+.bar #vdet{background:var(--panel2);font-size:14px;padding:8px 12px}
+.bar .primary#vedit{padding:8px 12px;font-size:14px;white-space:nowrap}
+.vview{padding-bottom:40px}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 14px}
+.badge,.fbadge{padding:4px 12px;border-radius:99px;font-size:13px;font-weight:700;background:var(--panel2);border:1px solid var(--line)}
+.fbadge{color:#10131f;border-color:transparent}
+.badge.ok{background:#175f43;border-color:var(--ok)}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:12px;grid-auto-rows:max-content}
+.vgrid .pcard{cursor:pointer}
+.vgrid .pcard .pimg{outline:3px solid var(--fc,#e08a2a);outline-offset:-3px}
+.vgrid .pcard .cn{font-size:12px}
+.vcols{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:6px}
+@media (max-width:700px){.vcols{grid-template-columns:1fr}}
+.vview h3{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:20px 0 10px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media (max-width:520px){.stats{grid-template-columns:repeat(2,1fr)}}
+.stat{background:var(--panel);border-radius:10px;padding:10px 12px}
+.stat b{display:block;font-size:22px}
+.stat span{font-size:12px;color:var(--muted)}
+.vcurve{display:flex;align-items:flex-end;gap:6px;height:110px;padding-top:6px}
+.vcurve div{flex:1;height:100%;position:relative;display:flex;flex-direction:column;justify-content:flex-end;align-items:center}
+.vcurve i{display:block;width:100%;background:#3b7be0;border-radius:4px 4px 0 0;min-height:2px;margin-bottom:18px}
+.vcurve em{position:absolute;bottom:20px;font-style:normal;font-size:12px;transform:translateY(-100%);padding-bottom:2px;display:none}
+.vcurve span{position:absolute;bottom:0;font-size:11px;color:var(--muted)}
