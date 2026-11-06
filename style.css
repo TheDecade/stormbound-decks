@@ -175,3 +175,15 @@ details>summary{padding:8px 0;font-weight:600;color:var(--muted)}
   .tools.showres .tcol#tout{display:block}
   .pgrid.four{grid-template-columns:repeat(2,1fr)}
 }
+
+/* deck so far (bottom bar of the battle tools) */
+.deckbar{flex:none;background:var(--panel);border-top:1px solid var(--line);padding:8px 12px calc(8px + var(--safe-b))}
+.dbh{font-size:14px;margin-bottom:6px}
+.dbrow{display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.dbc{flex:none;width:84px}
+.dbi{position:relative;border-radius:10px;overflow:hidden;background:var(--panel2)}
+.dbi img{width:100%;height:auto;display:block}
+.dbi .cm{position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#3b7be0;border:2px solid #fff8;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px}
+.dbi .tn{position:absolute;right:3px;top:3px;background:#000b;border-radius:8px;padding:0 5px;font-size:10px;font-weight:700}
+.dbi .cn{position:absolute;left:0;right:0;bottom:0;padding:10px 3px 3px;background:linear-gradient(transparent,#000d);font-size:10px;font-weight:600;text-align:center;line-height:1.1}
+.dbe{font-size:13px;padding:6px 0}

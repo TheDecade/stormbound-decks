@@ -33,7 +33,8 @@ function renderTools() {
   $("#app").innerHTML = `
     <div class="bar"><button class="ghost" id="back">‹ Decks</button><h1>Hand calculator</h1>
       <div class="tabs"><button id="hin">Cards</button><button id="hout">Result</button></div></div>
-    <div class="tools ${H.tab === "out" ? "showres" : ""}"><div class="tcol" id="tin"></div><div class="tcol" id="tout"></div></div>`;
+    <div class="tools ${H.tab === "out" ? "showres" : ""}"><div class="tcol" id="tin"></div><div class="tcol" id="tout"></div></div>
+    <div class="deckbar" id="deckbar"></div>`;
   $("#back").onclick = () => { location.hash = "#/"; };
   $("#hin").onclick = () => setHTab("in"); $("#hout").onclick = () => setHTab("out");
   setHTab(H.tab); drawInput(); drawResult();
@@ -45,7 +46,17 @@ function setHTab(t) {
 }
 
 /* ---------- the turns ---------- */
+function drawDeckBar() {
+  const bar = $("#deckbar"); if (!bar) return;
+  const rows = [];
+  T.turns.forEach((t, i) => t.cards.forEach(id => { if (BYID[id] && !rows.some(r => r.id === id)) rows.push({ id, turn: i + 1 }); }));
+  bar.innerHTML = `<div class="dbh"><b>Deck so far</b> <span class="dim">${rows.length}/${DECK_SIZE} cards seen played</span></div>` +
+    (rows.length ? `<div class="dbrow">${rows.map(({ id, turn }) => { const c = BYID[id];
+      return `<div class="dbc"><div class="dbi"><img src="${thumb(c)}" alt="" width="256" height="256"><span class="cm">${c.mana}</span><span class="tn">T${turn}</span><span class="cn">${esc(c.name)}</span></div></div>`; }).join("")}</div>`
+      : `<div class="dim dbe">No card yet: the cards you add as played appear here.</div>`);
+}
 function drawInput() {
+  drawDeckBar();
   const box = $("#tin"); if (!box) return;
   const pool = candidatePool(), names = Object.keys(pool), on = names.filter(n => !T.off.includes(n));
   let h = `<p class="hint left">Add the cards the opponent played each turn, then tap <b>Done</b>. Cards seen played are in its deck for sure.</p><div id="turns">`;
