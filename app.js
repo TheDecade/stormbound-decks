@@ -28,6 +28,7 @@ function toast(msg) {
 
 /* ---------- routing ---------- */
 function route() {
+  if (location.hash === "#/tools") return renderTools();
   const m = location.hash.match(/^#\/deck\/(.+)$/);
   if (m && state.decks.find(d => d.id === m[1])) renderEditor(m[1]); else renderList();
 }
@@ -50,7 +51,7 @@ function groupDecks() {
 const openKeys = new Set(JSON.parse(sessionStorage.getItem("sb-open") || "[]"));
 function renderList() {
   const g = groupDecks();
-  let h = `<div class="bar"><h1>Stormbound Decks</h1></div><div class="scroll">`;
+  let h = `<div class="bar"><h1>Stormbound Decks</h1><button id="tools">⚔ Battle tools</button></div><div class="scroll">`;
   if (!state.decks.length) h += `<div class="empty">No decks yet.<br>Tap <b>+ New deck</b> to start.</div>`;
   for (const f of Object.keys(FACTIONS)) {
     if (!g[f]) continue;
@@ -72,10 +73,11 @@ function renderList() {
     }
     h += `</details>`;
   }
-  h += `<div class="footer-tools"><button id="exp">Export backup</button><button id="imp">Import backup</button></div></div>
+  h += `<div class="footer-tools"><button id="exp">Export backup</button><button id="imp">Import deck / backup</button></div></div>
     <button class="primary fab" id="new">+ New deck</button>`;
   $("#app").innerHTML = h;
   $("#new").onclick = pickFaction;
+  $("#tools").onclick = () => { location.hash = "#/tools"; };
   $("#exp").onclick = exportBackup;
   $("#imp").onclick = importBackup;
   $("#app").querySelectorAll("details").forEach(el => el.addEventListener("toggle", () => {
@@ -91,16 +93,47 @@ function exportBackup() {
   a.download = "stormbound-decks-" + new Date().toISOString().slice(0, 10) + ".json";
   document.body.appendChild(a); a.click(); a.remove();
 }
+const FACTION_KEYS = { winter: "winter", winter_pact: "winter", swarm: "swarm", ironclad: "ironclad", shadowfen: "shadowfen" };
+const sameCI = (list, v) => list.find(x => norm(x) === norm(v)) || v;
+/** A deck file of the Stormbound project (name, v1, v2..., card_pool; made by the web calculator) -> a deck of this app. */
+function deckFromFile(s) {
+  const vs = Object.keys(s).filter(k => /^v\d+$/.test(k)).sort((a, b) => a.slice(1) - b.slice(1));
+  const names = vs.length ? s[vs[vs.length - 1]] : s.cards;
+  if (!Array.isArray(names)) return null;
+  const byName = Object.fromEntries(CARDS.map(c => [norm(c.name), c.id]));
+  const ids = [...new Set(names.map(n => byName[norm(n)]).filter(Boolean))].slice(0, DECK_SIZE);
+  if (!ids.length) return null;
+  let faction = FACTION_KEYS[norm(String(s.faction || "")).replace(/ /g, "_")];
+  if (!faction) {
+    const cnt = {}; ids.forEach(i => { const f = BYID[i].faction; if (f !== "neutral") cnt[f] = (cnt[f] || 0) + 1; });
+    faction = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0];
+  }
+  if (!faction) return null;
+  const cap = x => x ? x.charAt(0).toUpperCase() + x.slice(1) : "";
+  const name = s.nickname || cap(String(s.name || "Imported deck").replace(/_/g, " "));
+  return { id: uid(), name, faction, archetype: sameCI(uniq(state.decks.map(d => d.archetype)), cap(String(s.archetype || "").replace(/_/g, " "))),
+    type: sameCI(uniq(state.decks.map(d => d.type)), String(s.type || "")), cards: ids, saved: true, updated: Date.now() };
+}
 function importBackup() {
-  const i = document.createElement("input"); i.type = "file"; i.accept = "application/json,.json";
+  const i = document.createElement("input"); i.type = "file"; i.accept = "application/json,.json"; i.multiple = true;
   i.onchange = async () => {
-    try {
-      const s = JSON.parse(await i.files[0].text());
-      if (!Array.isArray(s.decks)) throw 0;
-      const have = new Set(state.decks.map(d => d.id));
-      let n = 0; for (const d of s.decks) if (!have.has(d.id)) { state.decks.push(d); n++; }
-      save(); renderList(); toast(`Imported ${n} deck${n === 1 ? "" : "s"}`);
-    } catch (e) { toast("Not a valid backup file"); }
+    let n = 0, skipped = 0, bad = 0;
+    for (const f of i.files) {
+      try {
+        const s = JSON.parse(await f.text());
+        if (Array.isArray(s.decks)) {  // a backup of this app
+          const have = new Set(state.decks.map(d => d.id));
+          for (const d of s.decks) if (!have.has(d.id)) { state.decks.push(d); n++; }
+        } else {  // a deck file
+          const d = deckFromFile(s); if (!d) throw 0;
+          const key = x => x.faction + "|" + norm(x.name) + "|" + [...x.cards].sort().join();
+          if (state.decks.some(x => key(x) === key(d))) { skipped++; continue; }
+          state.decks.push(d); n++;
+        }
+      } catch (e) { bad++; }
+    }
+    save(); renderList();
+    toast(`Imported ${n} deck${n === 1 ? "" : "s"}` + (skipped ? `, ${skipped} already there` : "") + (bad ? `, ${bad} not valid` : ""));
   };
   i.click();
 }
