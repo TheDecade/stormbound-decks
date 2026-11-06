@@ -52,7 +52,11 @@ summary .cnt{margin-left:auto;color:var(--muted);font-weight:400;font-size:14px}
 .factions{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .factions button{padding:14px 4px;border:2px solid transparent;background:var(--panel2);font-weight:700;font-size:14px;border-top:5px solid var(--fc)}
 .factions button.sel{border-color:var(--fc);background:color-mix(in srgb,var(--fc) 28%,var(--panel2))}
-.actions{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}
+.actions{display:flex;gap:10px;justify-content:flex-end;margin-top:6px;flex-wrap:wrap}
+.frrow{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.frrow > div:first-child{flex:1;min-width:0}
+.frrow .dim{color:var(--muted);font-size:13px;margin-top:2px;overflow-wrap:anywhere}
+.frrow button{padding:4px 10px}
 .combo{position:relative}
 .combo .caret{position:absolute;right:4px;top:4px;bottom:4px;width:42px;padding:0;background:transparent;color:var(--muted)}
 .combo input{padding-right:46px}

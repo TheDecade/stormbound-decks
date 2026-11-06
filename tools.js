@@ -2,11 +2,11 @@
 /* Battle tools page: hand calculator (port of the Stormbound project's /tools page) + "create a deck from the played cards". */
 const HKEY = "sb-hand-v1";
 let BUNDLED = null;
-let T = { turns: [{ cards: [], done: false }], off: [], cycle: "first" };
+let T = { turns: [{ cards: [], done: false }], off: [], cycle: "first", game: uid() };  // game: one id a game, so saving its fragment again updates it
 let H = { last: null, seq: 0, openDeck: null, tab: "in" };
 try {
   const j = JSON.parse(localStorage.getItem(HKEY) || "null");
-  if (j && Array.isArray(j.turns) && j.turns.length) T = { turns: j.turns, off: j.off || [], cycle: j.cycle || "first" };
+  if (j && Array.isArray(j.turns) && j.turns.length) T = { turns: j.turns, off: j.off || [], cycle: j.cycle || "first", game: j.game || uid() };
 } catch (e) {}
 const hsave = () => { try { localStorage.setItem(HKEY, JSON.stringify(T)); } catch (e) {} };
 const pct = (x, d = 0) => (100 * x).toFixed(d) + "%";
@@ -75,7 +75,7 @@ function drawInput() {
   h += `</div><div class="bar2"><button id="hundo">Undo last turn</button><button id="hnew">New game</button>
     <select id="hcycle"><option value="first">Cycle: before it plays</option><option value="after">Cycle: after it plays</option></select></div>
     <button class="primary wide" id="hmake">Create deck from played cards (${playedCards().length})</button>
-    <p class="hint left">${esc(poolInfo())} An opponent with another deck is not found.</p>`;
+    <p class="hint left">${esc(poolInfo())} An opponent with another deck is not found. Fragments saved: ${state.fragments.length}.</p>`;
   box.innerHTML = h;
   $("#hcycle").value = T.cycle;
   $("#hcycle").onchange = e => { T.cycle = e.target.value; hsave(); recalc(); };
@@ -98,7 +98,7 @@ function drawInput() {
     T.turns = T.turns.slice(0, done.length - 1); T.turns.push({ cards: [], done: false }); hsave(); drawInput(); recalc();
   };
   $("#hnew").onclick = () => { if (playedCards().length && !confirm("Start a new game? The cards entered are cleared.")) return;
-    T.turns = [{ cards: [], done: false }]; H.openDeck = null; hsave(); drawInput(); recalc(); };
+    T.turns = [{ cards: [], done: false }]; T.game = uid(); H.openDeck = null; hsave(); drawInput(); recalc(); };
   $("#hmake").onclick = makeDeckDialog;
 }
 function drawSugg(q) {
@@ -187,12 +187,25 @@ function makeDeckDialog() {
     <div class="field"><label>Nickname</label><input id="dn" autocomplete="off" placeholder="e.g. Frost opponent"></div>
     <div class="field"><label>Archetype</label><div id="ca"></div></div>
     <div class="field"><label>Type</label><div id="ct"></div></div>
-    <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="ok">Save to my decks</button></div></div>`);
+    <p class="hint left"><b>Create fragment</b> keeps these cards as statistics only (not a deck) and needs just the faction: no nickname, archetype or type. Tap it again in the same game to update the fragment.</p>
+    <div class="actions"><button id="cancel">Cancel</button><button id="frag">Create fragment</button><button class="primary" id="ok">Save to my decks</button></div></div>`);
   o.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { v.faction = b.dataset.f; o.querySelectorAll("[data-f]").forEach(x => x.classList.toggle("sel", x === b)); });
   const opts = key => () => { const same = uniq(state.decks.filter(d => d.faction === v.faction).map(d => d[key])); return same.concat(uniq(state.decks.map(d => d[key])).filter(a => !same.includes(a))); };
   combo($("#ca"), { value: "", placeholder: "Pick or create archetype…", onChange: x => v.archetype = x, options: opts("archetype") });
   combo($("#ct"), { value: "", placeholder: "Pick or create type…", onChange: x => v.type = x, options: opts("type") });
   $("#cancel").onclick = closeModal;
+  $("#frag").onclick = () => {
+    if (facs.length > 1) return toast("These cards come from more than one faction: a fragment holds one");
+    if (!v.faction) return toast("Pick a faction");
+    if (facs.length === 1 && facs[0] !== v.faction) return toast(`These cards are ${FACTIONS[facs[0]]}, not ${FACTIONS[v.faction]}`);
+    const lastWithCards = T.turns.reduce((m, t, i) => t.cards.length ? i + 1 : m, 0);
+    const rec = { id: uid(), game: T.game, cards: ids.slice(0, DECK_SIZE), faction: v.faction, date: new Date().toISOString().slice(0, 10),
+      turns: Math.max(T.turns.filter(t => t.done).length, lastWithCards), updated: Date.now() };
+    const at = state.fragments.findIndex(f => f.game === T.game);
+    if (at >= 0) { rec.id = state.fragments[at].id; rec.date = state.fragments[at].date; state.fragments[at] = rec; } else state.fragments.push(rec);
+    save(); closeModal(); drawInput();
+    toast(`${at >= 0 ? "Fragment updated" : "Fragment saved"}: ${rec.cards.length} card${rec.cards.length === 1 ? "" : "s"}, ${FACTIONS[v.faction]} (${state.fragments.length} in all)`);
+  };
   $("#ok").onclick = () => {
     v.name = $("#dn").value.trim();
     if (!v.faction) return toast("Pick a faction");

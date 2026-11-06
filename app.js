@@ -6,7 +6,7 @@ const DECK_SIZE = 12;
 const KEY = "sb-decks-v1";
 
 let CARDS = [], BYID = {};
-let state = { decks: [] };
+let state = { decks: [], fragments: [] };  // fragments: incomplete lists of cards seen in a game, kept as statistics (not decks)
 let ui = { search: "", kind: "all", tab: "cards" };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -17,6 +17,7 @@ const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(
 /* ---------- storage ---------- */
 function load() {
   try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.decks)) state = s; } catch (e) {}
+  if (!Array.isArray(state.fragments)) state.fragments = [];
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { toast("Could not save (storage full or blocked)"); }
@@ -74,13 +75,15 @@ function renderList() {
     }
     h += `</details>`;
   }
-  h += `<div class="footer-tools"><button id="expc">Export for PC (decks folder)</button><button id="exp">Export backup</button><button id="imp">Import deck / backup</button></div></div>
+  const nSaved = state.decks.filter(d => d.saved !== false).length, nFrag = state.fragments.length;
+  h += `<div class="footer-tools"><button id="expc">Export for PC (${nSaved} deck${nSaved === 1 ? "" : "s"}, ${nFrag} fragment${nFrag === 1 ? "" : "s"})</button><button id="frags">Fragments (${nFrag})</button><button id="exp">Export backup</button><button id="imp">Import deck / backup</button></div></div>
     <button class="primary fab" id="new">+ New deck</button>`;
   $("#app").innerHTML = h;
   $("#new").onclick = pickFaction;
   $("#tools").onclick = () => { location.hash = "#/tools"; };
   $("#exp").onclick = exportBackup;
-  $("#expc").onclick = () => exportForPc(state.decks.filter(d => d.saved !== false));
+  $("#expc").onclick = () => exportForPc(state.decks.filter(d => d.saved !== false), state.fragments);
+  $("#frags").onclick = fragmentsDialog;
   $("#imp").onclick = importBackup;
   $("#app").querySelectorAll("details").forEach(el => el.addEventListener("toggle", () => {
     el.open ? openKeys.add(el.dataset.k) : openKeys.delete(el.dataset.k);
@@ -97,10 +100,15 @@ function deckToFile(d) {
   return { name: slug(d.name) || "deck", nickname: d.name, faction: FOLDER[d.faction], archetype: slug(d.archetype || ""), type: d.type || "",
     v1: cards, card_pool: cards.slice(), source: { site: "ipad deck app", title: d.name, date: new Date().toISOString().slice(0, 10) } };
 }
-async function exportForPc(decks) {
-  if (!decks.length) return toast("No saved decks to export");
-  const one = decks.length === 1;
-  const data = one ? deckToFile(decks[0]) : { format: "stormbound-ipad-decks", decks: decks.map(deckToFile) };
+/** A fragment as the PC imports it (scripts/import_ipad_decks.py): card names, the faction folder name, the id of the game. */
+function fragToFile(f) {
+  return { id: f.id, game: f.game, cards: f.cards.filter(i => BYID[i]).map(i => BYID[i].name), faction: FOLDER[f.faction],
+    turns_seen: f.turns || null, date: f.date, source: "ipad" };
+}
+async function exportForPc(decks, frags = []) {
+  if (!decks.length && !frags.length) return toast("No saved decks or fragments to export");
+  const one = decks.length === 1 && !frags.length;  // one deck alone is a plain deck file
+  const data = one ? deckToFile(decks[0]) : { format: "stormbound-ipad-decks", decks: decks.map(deckToFile), fragments: frags.map(fragToFile) };
   const fname = one ? data.name + ".json" : "ipad-decks-" + new Date().toISOString().slice(0, 10) + ".json";
   const file = new File([JSON.stringify(data, null, 2)], fname, { type: "application/json" });
   try {
@@ -141,13 +149,20 @@ function deckFromFile(s) {
 function importBackup() {
   const i = document.createElement("input"); i.type = "file"; i.accept = "application/json,.json"; i.multiple = true;
   i.onchange = async () => {
-    let n = 0, skipped = 0, bad = 0;
+    let n = 0, nf = 0, skipped = 0, bad = 0;
     for (const f of i.files) {
       try {
         const s = JSON.parse(await f.text());
         if (Array.isArray(s.decks)) {  // a backup of this app
           const have = new Set(state.decks.map(d => d.id));
           for (const d of s.decks) if (!have.has(d.id)) { state.decks.push(d); n++; }
+          const haveF = new Set(state.fragments.map(x => x.id)), byName = Object.fromEntries(CARDS.map(c => [norm(c.name), c.id]));
+          for (const fr of Array.isArray(s.fragments) ? s.fragments : []) {  // ids (a backup) or card names (an export for the PC)
+            const cards = (fr.cards || []).map(x => BYID[x] ? x : byName[norm(x)]).filter(Boolean), fac = FACTION_KEYS[norm(String(fr.faction || "")).replace(/ /g, "_")];
+            if (!fr.id || haveF.has(fr.id) || !cards.length || !fac) continue;
+            state.fragments.push({ id: fr.id, game: fr.game || "", cards, faction: fac, turns: fr.turns || fr.turns_seen || null, date: fr.date || new Date().toISOString().slice(0, 10), updated: fr.updated || Date.now() });
+            nf++;
+          }
         } else {  // a deck file
           const d = deckFromFile(s); if (!d) throw 0;
           const key = x => x.faction + "|" + norm(x.name) + "|" + [...x.cards].sort().join();
@@ -157,9 +172,28 @@ function importBackup() {
       } catch (e) { bad++; }
     }
     save(); renderList();
-    toast(`Imported ${n} deck${n === 1 ? "" : "s"}` + (skipped ? `, ${skipped} already there` : "") + (bad ? `, ${bad} not valid` : ""));
+    toast(`Imported ${n} deck${n === 1 ? "" : "s"}` + (nf ? `, ${nf} fragment${nf === 1 ? "" : "s"}` : "") + (skipped ? `, ${skipped} already there` : "") + (bad ? `, ${bad} not valid` : ""));
   };
   i.click();
+}
+
+/* ---------- fragments: the list, with a way to delete a wrong one ---------- */
+function fragmentsDialog() {
+  const draw = () => {
+    const rows = state.fragments.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0));
+    const o = openModal(`<div class="modal"><h2>Fragments (${rows.length})</h2>
+      <p class="hint left">Incomplete lists of the cards an opponent played, kept as statistics only. They go to the PC with <b>Export for PC</b>.</p>
+      ${rows.map(f => `<div class="frrow f-${f.faction}"><div><b>${FACTIONS[f.faction] || ""}</b> · ${f.cards.length} card${f.cards.length === 1 ? "" : "s"} · ${esc(f.date || "")}
+        <div class="dim">${esc(f.cards.filter(i => BYID[i]).map(i => BYID[i].name).join(", "))}</div></div>
+        <button class="danger" data-del="${f.id}" aria-label="delete">✕</button></div>`).join("") || `<div class="hint">No fragment yet. In Battle tools, add the cards an opponent played, then <b>Create deck from played cards</b> → <b>Create fragment</b>.</div>`}
+      <div class="actions"><button id="cancel">Close</button></div></div>`);
+    $("#cancel").onclick = () => { closeModal(); if (!location.hash || location.hash === "#/") renderList(); };
+    o.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
+      if (!confirm("Delete this fragment?")) return;
+      state.fragments = state.fragments.filter(f => f.id !== b.dataset.del); save(); draw();
+    });
+  };
+  draw();
 }
 
 /* ---------- combo box (dropdown of existing + create new) ---------- */
