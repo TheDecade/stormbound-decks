@@ -27,6 +27,11 @@ function candidatePool() {
   return out;
 }
 const nameOf = id => BYID[id].name;
+const poolInfo = () => { const mine = state.decks.filter(d => d.saved !== false);
+  const ok = mine.filter(d => d.cards.length === DECK_SIZE).length, bundled = Object.keys(BUNDLED || {}).length;
+  return `Candidates: ${bundled} project decks + ${ok} of your ${mine.length} saved deck${mine.length === 1 ? "" : "s"}` +
+    (mine.length > ok ? ` (${mine.length - ok} skipped: fewer than ${DECK_SIZE} cards, they would skew the odds)` : "") + ".";
+};
 
 function renderTools() {
   loadBundled().then(() => { if (location.hash === "#/tools") { drawInput(); recalc(); } });
@@ -58,8 +63,7 @@ function drawDeckBar() {
 function drawInput() {
   drawDeckBar();
   const box = $("#tin"); if (!box) return;
-  const pool = candidatePool(), names = Object.keys(pool), on = names.filter(n => !T.off.includes(n));
-  let h = `<p class="hint left">Add the cards the opponent played each turn, then tap <b>Done</b>. Cards seen played are in its deck for sure.</p><div id="turns">`;
+    let h = `<p class="hint left">Add the cards the opponent played each turn, then tap <b>Done</b>. Cards seen played are in its deck for sure.</p><div id="turns">`;
   T.turns.forEach((t, i) => {
     h += `<div class="turn ${t.done ? "done" : ""}"><div class="thead"><b>Turn ${i + 1}</b><div class="tchips">` +
       (t.cards.map((id, k) => `<span class="pick f-${BYID[id].faction}"><span class="m">${BYID[id].mana}</span>${esc(nameOf(id))}${t.done ? "" : `<button data-rm="${i}:${k}" aria-label="remove">✕</button>`}</span>`).join("") ||
@@ -71,10 +75,7 @@ function drawInput() {
   h += `</div><div class="bar2"><button id="hundo">Undo last turn</button><button id="hnew">New game</button>
     <select id="hcycle"><option value="first">Cycle: before it plays</option><option value="after">Cycle: after it plays</option></select></div>
     <button class="primary wide" id="hmake">Create deck from played cards (${playedCards().length})</button>
-    <details><summary>Candidate decks (${on.length} of ${names.length})</summary>
-      <div class="bar2"><button id="dall">all</button><button id="dnone">none</button></div>
-      <div class="decksel">${names.map(n => `<label><input type="checkbox" data-d="${esc(n)}" ${T.off.includes(n) ? "" : "checked"}> ${esc(pool[n].title)} <span class="dim">${esc(pool[n].archetype)}</span></label>`).join("")}</div>
-      <p class="hint left">The decks of the Stormbound project plus the 12-card decks you saved (★). An opponent with another deck is not found.</p></details>`;
+    <p class="hint left">${esc(poolInfo())} An opponent with another deck is not found.</p>`;
   box.innerHTML = h;
   $("#hcycle").value = T.cycle;
   $("#hcycle").onchange = e => { T.cycle = e.target.value; hsave(); recalc(); };
@@ -98,10 +99,6 @@ function drawInput() {
   };
   $("#hnew").onclick = () => { if (playedCards().length && !confirm("Start a new game? The cards entered are cleared.")) return;
     T.turns = [{ cards: [], done: false }]; H.openDeck = null; hsave(); drawInput(); recalc(); };
-  $("#dall").onclick = () => { T.off = []; hsave(); drawInput(); recalc(); };
-  $("#dnone").onclick = () => { T.off = names.slice(); hsave(); drawInput(); recalc(); };
-  box.querySelectorAll("[data-d]").forEach(c => c.onchange = () => {
-    T.off = c.checked ? T.off.filter(x => x !== c.dataset.d) : [...T.off, c.dataset.d]; hsave(); drawInput(); recalc(); });
   $("#hmake").onclick = makeDeckDialog;
 }
 function drawSugg(q) {
@@ -121,7 +118,7 @@ function recalc() {
   setTimeout(() => {
     if (my !== H.seq) return;
     const pool = candidatePool(), decks = {};
-    for (const [n, d] of Object.entries(pool)) if (!T.off.includes(n)) decks[n] = d.cards;
+    for (const [n, d] of Object.entries(pool)) decks[n] = d.cards;
     const res = HC.analyse(decks, turns.map(t => t.map(nameOf)), { cycleFirst: T.cycle !== "after" });
     res.pool = Object.keys(decks).length; res.poolMeta = pool;
     H.last = res; drawResult();
@@ -144,7 +141,14 @@ function drawHandBar() {
   const ranked = Object.entries(r.hand).sort((a, b) => b[1] - a[1]);
   const hand = r.best_hand ? r.best_hand.cards.slice().sort((a, b) => (r.hand[b] || 0) - (r.hand[a] || 0)) : ranked.slice(0, HC.HAND_SIZE).map(x => x[0]);
   const others = ranked.filter(([c]) => !hand.includes(c)).slice(0, 6);
-  bar.innerHTML = `<div class="hbs"><div class="dbh"><b>Most probable hand now</b>${r.best_hand ? ` <span class="dim">exact hand ${pct(r.best_hand.p, 1)}</span>` : ""}</div>
+  const nT = confirmedTurns().length;
+  const odds = `<div class="hbs"><div class="dbh"><b>Which deck?</b> <span class="dim">${r.decks.length} of ${r.pool} candidates fit, after ${nT} turn${nT > 1 ? "s" : ""}</span></div>` +
+    r.decks.slice(0, 8).map(d => { const m = r.poolMeta[d.name], open = H.openDeck === d.name;
+      return `<div class="drow2 ${open ? "on" : ""}" data-dk="${esc(d.name)}"><div class="nm">${esc(m.title)}<small>${facName(m.faction)} · ${esc(m.archetype)}</small></div><div class="track"><i style="width:${d.p * 100}%"></i></div><div class="v">${pct(d.p)}</div></div>` +
+        (open ? `<div class="mini" style="margin:2px 6px 8px">${d.cards.map(c => `<span class="${seen.has(c) ? "seen" : ""}">${esc(c)}<b>${pct(r.hand[c] || 0)}</b></span>`).join("")}</div>` : ""); }).join("") +
+    (r.decks.length > 8 ? `<p class="hint left">+ ${r.decks.length - 8} less likely decks</p>` : "") + `</div>`;
+  bar.onclick = e => { const d = e.target.closest("[data-dk]"); if (d) { H.openDeck = H.openDeck === d.dataset.dk ? null : d.dataset.dk; drawHandBar(); } };
+  bar.innerHTML = odds + `<div class="hbs"><div class="dbh"><b>Most probable hand now</b>${r.best_hand ? ` <span class="dim">exact hand ${pct(r.best_hand.p, 1)}</span>` : ""}</div>
       <div class="hbrow">${hand.map(c => probCard(c, r.hand[c] || 0, seen.has(c))).join("")}</div></div>
     <div class="hbs"><div class="dbh"><b>Other cards it could hold</b></div>
       <div class="hbrow">${others.map(([c, p]) => probCard(c, p, seen.has(c))).join("")}</div></div>`;
@@ -159,13 +163,7 @@ function drawResult() {
     box.innerHTML = `<div class="note"><b>No candidate deck fits.</b> ${r.candidates ? `${r.candidates} deck(s) hold all the cards seen, but none can have produced these plays with a cycle every turn.` : "No candidate deck holds all these cards."} The opponent has a deck this tool does not know, or a card is wrong (use Edit on a turn). Create a deck from the played cards to remember it.</div>`;
     return;
   }
-  let h = `<h3>Which deck? <span class="dim">(${r.decks.length} of ${r.pool} fit, after ${n} turn${n > 1 ? "s" : ""})</span></h3>`;
-  r.decks.slice(0, 8).forEach(d => {
-    const m = r.poolMeta[d.name], open = H.openDeck === d.name;
-    h += `<div class="drow2 ${open ? "on" : ""}" data-dk="${esc(d.name)}"><div class="nm">${esc(m.title)}<small>${facName(m.faction)} · ${esc(m.archetype)}</small></div><div class="track"><i style="width:${d.p * 100}%"></i></div><div class="v">${pct(d.p)}</div></div>`;
-    if (open) h += `<div class="mini">${d.cards.map(c => `<span class="${seen.has(c) ? "seen" : ""}">${esc(c)}<b>${pct(r.hand[c] || 0)}</b></span>`).join("")}</div>`;
-  });
-  if (r.decks.length > 8) h += `<p class="hint left">+ ${r.decks.length - 8} less likely decks</p>`;
+  let h = "";
   h += `<h3>After its next cycle</h3><div class="mini">${Object.entries(r.next).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c, p]) => `<span class="${seen.has(c) ? "seen" : ""}">${esc(c)}<b>${pct(p)}</b></span>`).join("")}</div>`;
   h += `<h3>Cards seen: in the hand again?</h3><div class="mini">${Object.entries(r.seen).sort((a, b) => b[1].p_hand - a[1].p_hand).map(([c, v]) => `<span class="seen">${esc(c)}<b>${pct(v.p_hand)}</b></span>`).join("")}</div>
     <p class="hint left">Gold: seen played, so in the deck for certain. Assumes the opponent cycles a card every turn; estimated from simulated games, so small percentages move a little between runs.</p>`;
