@@ -73,18 +73,41 @@ function renderList() {
     }
     h += `</details>`;
   }
-  h += `<div class="footer-tools"><button id="exp">Export backup</button><button id="imp">Import deck / backup</button></div></div>
+  h += `<div class="footer-tools"><button id="expc">Export for PC (decks folder)</button><button id="exp">Export backup</button><button id="imp">Import deck / backup</button></div></div>
     <button class="primary fab" id="new">+ New deck</button>`;
   $("#app").innerHTML = h;
   $("#new").onclick = pickFaction;
   $("#tools").onclick = () => { location.hash = "#/tools"; };
   $("#exp").onclick = exportBackup;
+  $("#expc").onclick = () => exportForPc(state.decks.filter(d => d.saved !== false));
   $("#imp").onclick = importBackup;
   $("#app").querySelectorAll("details").forEach(el => el.addEventListener("toggle", () => {
     el.open ? openKeys.add(el.dataset.k) : openKeys.delete(el.dataset.k);
     sessionStorage.setItem("sb-open", JSON.stringify([...openKeys]));
   }));
   $("#app").onclick = e => { const r = e.target.closest(".deckrow"); if (r) location.hash = "#/deck/" + r.dataset.id; };
+}
+
+/* ---------- export for the PC: deck files in the convention of the Stormbound project's data/decks ---------- */
+const FOLDER = { winter: "winter_pact", swarm: "swarm", ironclad: "ironclad", shadowfen: "shadowfen" };
+const slug = s => norm(s).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+function deckToFile(d) {
+  const cards = d.cards.map(i => BYID[i].name);
+  return { name: slug(d.name) || "deck", nickname: d.name, faction: FOLDER[d.faction], archetype: slug(d.archetype || ""), type: d.type || "",
+    v1: cards, card_pool: cards.slice(), source: { site: "ipad deck app", title: d.name, date: new Date().toISOString().slice(0, 10) } };
+}
+async function exportForPc(decks) {
+  if (!decks.length) return toast("No saved decks to export");
+  const one = decks.length === 1;
+  const data = one ? deckToFile(decks[0]) : { format: "stormbound-ipad-decks", decks: decks.map(deckToFile) };
+  const fname = one ? data.name + ".json" : "ipad-decks-" + new Date().toISOString().slice(0, 10) + ".json";
+  const file = new File([JSON.stringify(data, null, 2)], fname, { type: "application/json" });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: fname }); return; }
+  } catch (e) { if (e.name === "AbortError") return; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  toast(`Saved ${fname}`);
 }
 
 function exportBackup() {
@@ -190,6 +213,7 @@ function deckDialog(deck) {
     <div class="field"><label>Archetype</label><div id="ca"></div></div>
     <div class="field"><label>Type</label><div id="ct"></div></div>
     <div class="actions"><button class="danger" id="del" style="margin-right:auto">Delete</button>
+      ${draft ? "" : `<button id="expone">Export for PC</button>`}
       <button id="cancel">Cancel</button><button class="primary" id="ok">Save</button></div></div>`);
   o.querySelectorAll("[data-f]").forEach(b => b.onclick = () => {
     v.faction = b.dataset.f;
@@ -201,6 +225,7 @@ function deckDialog(deck) {
   combo($("#ct"), { value: v.type, placeholder: "Pick or create type…", onChange: x => v.type = x,
     options: () => { const same = uniq(others("type", d => d.faction === v.faction && (d.archetype || "") === (v.archetype || ""))); return same.concat(uniq(others("type", () => true)).filter(a => !same.includes(a))); } });
   $("#cancel").onclick = closeModal;
+  if (!draft) $("#expone").onclick = () => exportForPc([deck]);
   $("#del").onclick = () => {
     if (confirm(`Delete “${deck.name || "Untitled"}”?`)) { state.decks = state.decks.filter(d => d !== deck); save(); closeModal(); location.hash = "#/"; renderList(); }
   };
