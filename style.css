@@ -187,3 +187,17 @@ details>summary{padding:8px 0;font-weight:600;color:var(--muted)}
 .dbi .tn{position:absolute;right:3px;top:3px;background:#000b;border-radius:8px;padding:0 5px;font-size:10px;font-weight:700}
 .dbi .cn{position:absolute;left:0;right:0;bottom:0;padding:10px 3px 3px;background:linear-gradient(transparent,#000d);font-size:10px;font-weight:600;text-align:center;line-height:1.1}
 .dbe{font-size:13px;padding:6px 0}
+
+/* hand probabilities bar above "deck so far" */
+.bottom{flex:none;max-height:56vh;overflow:auto;-webkit-overflow-scrolling:touch;background:var(--panel);border-top:1px solid var(--line)}
+.bottom .deckbar{border-top:1px solid var(--line)}
+.handbar{padding:8px 12px 2px}
+.handbar[hidden]{display:none}
+.hbs{margin-bottom:8px}
+.hbrow{display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.hbrow .pcard{flex:none;width:96px}
+.pcard .cs,.pcard .cv{position:absolute;bottom:20px;width:22px;height:22px;border-radius:7px;border:2px solid #fff8;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
+.pcard .cs{left:4px;background:#c0392b}
+.pcard .cv{right:4px;background:#2d6fd0}
+.pcard .cn small{display:block;font-weight:400;color:#cbd2f0;font-size:9px}
+.pcard .cn{padding-bottom:3px}

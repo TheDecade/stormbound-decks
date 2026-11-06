@@ -34,7 +34,7 @@ function renderTools() {
     <div class="bar"><button class="ghost" id="back">‹ Decks</button><h1>Hand calculator</h1>
       <div class="tabs"><button id="hin">Cards</button><button id="hout">Result</button></div></div>
     <div class="tools ${H.tab === "out" ? "showres" : ""}"><div class="tcol" id="tin"></div><div class="tcol" id="tout"></div></div>
-    <div class="deckbar" id="deckbar"></div>`;
+    <div class="bottom"><div class="handbar" id="handbar" hidden></div><div class="deckbar" id="deckbar"></div></div>`;
   $("#back").onclick = () => { location.hash = "#/"; };
   $("#hin").onclick = () => setHTab("in"); $("#hout").onclick = () => setHTab("out");
   setHTab(H.tab); drawInput(); drawResult();
@@ -129,10 +129,28 @@ function recalc() {
 }
 function probCard(name, p, seen) {
   const c = CARDS.find(x => x.name === name);
-  return `<div class="pcard ${seen ? "seen" : ""}"><div class="pimg"><img src="${thumb(c)}" alt="" width="256" height="256"><span class="cm">${c.mana}</span><span class="cn">${esc(name)}</span></div>
+  const kind = c.units.length ? c.units.join(", ") : c.type;
+  return `<div class="pcard ${seen ? "seen" : ""}"><div class="pimg"><img src="${thumb(c)}" alt="" width="256" height="256"><span class="cm">${c.mana}</span>` +
+    (c.str != null ? `<span class="cs">${c.str}</span>` : "") + (c.spd ? `<span class="cv">${c.spd}</span>` : "") +
+    `<span class="cn">${esc(name)}<small>${esc(kind)}</small></span></div>
     <div class="pbar"><i style="width:${Math.min(100, p * 100)}%"></i><span>${pct(p)}</span></div></div>`;
 }
+function drawHandBar() {
+  const bar = $("#handbar"); if (!bar) return;
+  const r = H.last;
+  if (!r || !r.decks || !r.decks.length) { bar.innerHTML = ""; bar.hidden = true; return; }
+  bar.hidden = false;
+  const seen = new Set(confirmedTurns().flat().map(nameOf));
+  const ranked = Object.entries(r.hand).sort((a, b) => b[1] - a[1]);
+  const hand = r.best_hand ? r.best_hand.cards.slice().sort((a, b) => (r.hand[b] || 0) - (r.hand[a] || 0)) : ranked.slice(0, HC.HAND_SIZE).map(x => x[0]);
+  const others = ranked.filter(([c]) => !hand.includes(c)).slice(0, 6);
+  bar.innerHTML = `<div class="hbs"><div class="dbh"><b>Most probable hand now</b>${r.best_hand ? ` <span class="dim">exact hand ${pct(r.best_hand.p, 1)}</span>` : ""}</div>
+      <div class="hbrow">${hand.map(c => probCard(c, r.hand[c] || 0, seen.has(c))).join("")}</div></div>
+    <div class="hbs"><div class="dbh"><b>Other cards it could hold</b></div>
+      <div class="hbrow">${others.map(([c, p]) => probCard(c, p, seen.has(c))).join("")}</div></div>`;
+}
 function drawResult() {
+  drawHandBar();
   const box = $("#tout"); if (!box) return;
   const r = H.last, n = confirmedTurns().length;
   if (!r) { box.innerHTML = `<p class="hint">${n ? "No card seen yet: nothing to work from." : "Add the cards of turn 1 and tap Done."}</p>`; return; }
@@ -148,12 +166,6 @@ function drawResult() {
     if (open) h += `<div class="mini">${d.cards.map(c => `<span class="${seen.has(c) ? "seen" : ""}">${esc(c)}<b>${pct(r.hand[c] || 0)}</b></span>`).join("")}</div>`;
   });
   if (r.decks.length > 8) h += `<p class="hint left">+ ${r.decks.length - 8} less likely decks</p>`;
-  const ranked = Object.entries(r.hand).sort((a, b) => b[1] - a[1]);
-  const hand = r.best_hand ? r.best_hand.cards.slice().sort((a, b) => (r.hand[b] || 0) - (r.hand[a] || 0)) : ranked.slice(0, HC.HAND_SIZE).map(x => x[0]);
-  h += `<h3>Most probable hand now</h3>` + (r.best_hand ? `<p class="hint left">This exact hand: ${pct(r.best_hand.p, 1)}. Under each card: the chance it is in the hand.</p>` : "") +
-    `<div class="pgrid four">${hand.map(c => probCard(c, r.hand[c] || 0, seen.has(c))).join("")}</div>`;
-  const others = ranked.filter(([c]) => !hand.includes(c)).slice(0, 6);
-  h += `<h3>Other cards it could hold</h3><div class="pgrid">${others.map(([c, p]) => probCard(c, p, seen.has(c))).join("")}</div>`;
   h += `<h3>After its next cycle</h3><div class="mini">${Object.entries(r.next).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c, p]) => `<span class="${seen.has(c) ? "seen" : ""}">${esc(c)}<b>${pct(p)}</b></span>`).join("")}</div>`;
   h += `<h3>Cards seen: in the hand again?</h3><div class="mini">${Object.entries(r.seen).sort((a, b) => b[1].p_hand - a[1].p_hand).map(([c, v]) => `<span class="seen">${esc(c)}<b>${pct(v.p_hand)}</b></span>`).join("")}</div>
     <p class="hint left">Gold: seen played, so in the deck for certain. Assumes the opponent cycles a card every turn; estimated from simulated games, so small percentages move a little between runs.</p>`;
