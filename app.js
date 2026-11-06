@@ -186,14 +186,52 @@ function fragmentsDialog() {
       ${rows.map(f => `<div class="frrow f-${f.faction}"><div><b>${FACTIONS[f.faction] || ""}</b> · ${f.cards.length} card${f.cards.length === 1 ? "" : "s"} · ${esc(f.date || "")}
         <div class="dim">${esc(f.cards.filter(i => BYID[i]).map(i => BYID[i].name).join(", "))}</div></div>
         <button class="danger" data-del="${f.id}" aria-label="delete">✕</button></div>`).join("") || `<div class="hint">No fragment yet. In Battle tools, add the cards an opponent played, then <b>Create deck from played cards</b> → <b>Create fragment</b>.</div>`}
-      <div class="actions"><button id="cancel">Close</button></div></div>`);
+      <div class="actions"><button id="stats">Statistics</button><button id="cancel">Close</button></div></div>`);
     $("#cancel").onclick = () => { closeModal(); if (!location.hash || location.hash === "#/") renderList(); };
+    $("#stats").onclick = statsDialog;
     o.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
       if (!confirm("Delete this fragment?")) return;
       state.fragments = state.fragments.filter(f => f.id !== b.dataset.del); save(); draw();
     });
   };
   draw();
+}
+
+/* ---------- fragment statistics: which cards are used most, and what goes with what (fragments.js) ---------- */
+function statsDialog() {
+  const byName = Object.fromEntries(CARDS.map(c => [c.name, c]));
+  const rows = state.fragments.map(f => ({ cards: f.cards.filter(i => BYID[i]).map(i => BYID[i].name), faction: f.faction, id: f.id, kind: "fragment" }));
+  const corpus = new FR.Corpus(rows), st = { faction: "", card: "" }, pc = x => Math.round(100 * x) + "%";
+  const o = openModal(`<div class="modal"><h2>Fragment statistics</h2>
+    <p class="hint left">${rows.length} fragment${rows.length === 1 ? "" : "s"}. A card only shows once it is played, so cheap cards are seen more than expensive ones.</p>
+    <div class="factions" id="sf" style="grid-template-columns:repeat(5,1fr)"><button type="button" class="sel" data-sf="">All</button>${Object.entries(FACTIONS).map(([k, n]) => `<button type="button" class="f-${k}" data-sf="${k}">${n}</button>`).join("")}</div>
+    <input class="tq" id="sq" type="search" placeholder="Pick a card: what does it go with?" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"><div id="ssg"></div>
+    <div id="sres"></div>
+    <div class="actions"><button id="cancel">Back</button></div></div>`);
+  const chips = (title, items, label, tip) => `<h3>${title}</h3><div class="mini">${items.map(x =>
+    `<span data-pick="${esc(x.card)}" title="${esc(tip(x))}">${esc(x.card)}<b>${label(x)}</b></span>`).join("") || `<span class="dim">nothing yet</span>`}</div>`;
+  const drawRes = () => {
+    let h = "";
+    if (st.card && byName[st.card]) {
+      const c = byName[st.card], sc = corpus.scope(st.faction || (c.faction !== "neutral" ? c.faction : null)), info = FR.cardInfo(sc, st.card);
+      h += `<p><b>${esc(st.card)}</b>: in ${info.n} of ${info.of} fragment${info.of === 1 ? "" : "s"} (${pc(info.share)})</p>` +
+        chips("Most often together", sc.goesWith(st.card, "n", 10), x => x.n, x => `together in ${x.n} fragments; when ${st.card} is there, ${pc(x.p_given)} also hold ${x.card}`) +
+        chips("Attracted to it (seen together at least twice)", sc.goesWith(st.card, "lift", 10, 2), x => "×" + x.lift.toFixed(1), x => `${x.n} fragments together; ${x.lift.toFixed(1)} times more often than chance`);
+    }
+    h += chips(`Most used cards${st.faction ? " – " + FACTIONS[st.faction] : ""}`, corpus.scope(st.faction || null).topCards(20), x => x.n, x => `in ${pc(x.share)} of the fragments`);
+    if (!rows.length) h = `<div class="hint">No fragment yet.</div>`;
+    $("#sres").innerHTML = h;
+  };
+  o.querySelectorAll("[data-sf]").forEach(b => b.onclick = () => { st.faction = b.dataset.sf; o.querySelectorAll("[data-sf]").forEach(x => x.classList.toggle("sel", x === b)); drawRes(); });
+  $("#sres").onclick = e => { const s = e.target.closest("[data-pick]"); if (s) { st.card = s.dataset.pick; $("#sq").value = st.card; $("#ssg").innerHTML = ""; drawRes(); } };
+  $("#sq").addEventListener("input", () => {
+    const toks = norm($("#sq").value).split(/\s+/).filter(Boolean);
+    $("#ssg").innerHTML = !toks.length ? "" : CARDS.filter(c => toks.every(k => norm(c.name).includes(k))).slice(0, 6)
+      .map(c => `<div class="sg" data-pick="${esc(c.name)}"><span class="nm">${esc(c.name)}</span><small>${esc(FACTIONS[c.faction] || "Neutral")}</small></div>`).join("") || `<div class="hint">No match</div>`;
+  });
+  $("#ssg").onclick = $("#sres").onclick;
+  $("#cancel").onclick = fragmentsDialog;
+  drawRes();
 }
 
 /* ---------- combo box (dropdown of existing + create new) ---------- */

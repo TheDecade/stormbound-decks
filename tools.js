@@ -2,11 +2,11 @@
 /* Battle tools page: hand calculator (port of the Stormbound project's /tools page) + "create a deck from the played cards". */
 const HKEY = "sb-hand-v1";
 let BUNDLED = null;
-let T = { turns: [{ cards: [], done: false }], off: [], cycle: "first", game: uid() };  // game: one id a game, so saving its fragment again updates it
+let T = { turns: [{ cards: [], done: false }], off: [], cycle: "first", game: uid(), guess: true };  // game: one id a game, so saving its fragment again updates it; guess: build decks from the fragments when no known deck fits
 let H = { last: null, seq: 0, openDeck: null, tab: "in" };
 try {
   const j = JSON.parse(localStorage.getItem(HKEY) || "null");
-  if (j && Array.isArray(j.turns) && j.turns.length) T = { turns: j.turns, off: j.off || [], cycle: j.cycle || "first", game: j.game || uid() };
+  if (j && Array.isArray(j.turns) && j.turns.length) T = { turns: j.turns, off: j.off || [], cycle: j.cycle || "first", game: j.game || uid(), guess: j.guess !== false };
 } catch (e) {}
 const hsave = () => { try { localStorage.setItem(HKEY, JSON.stringify(T)); } catch (e) {} };
 const pct = (x, d = 0) => (100 * x).toFixed(d) + "%";
@@ -27,6 +27,12 @@ function candidatePool() {
   return out;
 }
 const nameOf = id => BYID[id].name;
+/** What the card statistics are computed from for a guess: the saved fragments and the known decks (card names). */
+function corpusRows(pool) {
+  const rows = state.fragments.map(f => ({ cards: f.cards.filter(i => BYID[i]).map(nameOf), faction: f.faction, id: f.id, title: "fragment " + String(f.id).slice(0, 6), kind: "fragment" }));
+  for (const [name, d] of Object.entries(pool)) rows.push({ cards: d.cards, faction: d.faction, id: name, title: d.title, kind: "deck" });
+  return rows;
+}
 const poolInfo = () => { const mine = state.decks.filter(d => d.saved !== false);
   const ok = mine.filter(d => d.cards.length === DECK_SIZE).length, bundled = Object.keys(BUNDLED || {}).length;
   return `Candidates: ${bundled} project decks + ${ok} of your ${mine.length} saved deck${mine.length === 1 ? "" : "s"}` +
@@ -75,8 +81,11 @@ function drawInput() {
   h += `</div><div class="bar2"><button id="hundo">Undo last turn</button><button id="hnew">New game</button>
     <select id="hcycle"><option value="first">Cycle: before it plays</option><option value="after">Cycle: after it plays</option></select></div>
     <button class="primary wide" id="hmake">Create deck from played cards (${playedCards().length})</button>
-    <p class="hint left">${esc(poolInfo())} An opponent with another deck is not found. Fragments saved: ${state.fragments.length}.</p>`;
+    <p class="hint left">${esc(poolInfo())} Fragments saved: ${state.fragments.length}. An opponent with another deck is guessed from them.</p>
+    <label class="hint left chk"><input type="checkbox" id="hguess"> Guess a deck when none fits</label>`;
   box.innerHTML = h;
+  $("#hguess").checked = T.guess !== false;
+  $("#hguess").onchange = e => { T.guess = e.target.checked; hsave(); recalc(); };
   $("#hcycle").value = T.cycle;
   $("#hcycle").onchange = e => { T.cycle = e.target.value; hsave(); recalc(); };
   const q = $("#tq");
@@ -117,10 +126,20 @@ function recalc() {
   $("#tout") && ($("#tout").innerHTML = `<p class="hint">thinking…</p>`);
   setTimeout(() => {
     if (my !== H.seq) return;
-    const pool = candidatePool(), decks = {};
+    const pool = candidatePool(), decks = {}, names = turns.map(t => t.map(nameOf)), opts = { cycleFirst: T.cycle !== "after" };
     for (const [n, d] of Object.entries(pool)) decks[n] = d.cards;
-    const res = HC.analyse(decks, turns.map(t => t.map(nameOf)), { cycleFirst: T.cycle !== "after" });
+    let res = HC.analyse(decks, names, opts);
     res.pool = Object.keys(decks).length; res.poolMeta = pool;
+    if (!res.candidates && T.guess !== false) {  // no known deck holds the cards seen: guess decks from the fragments and the known decks
+      const rows = corpusRows(pool), g = FR.guessDecks(names.flat(), CARDS, rows, { labels: FACTIONS });
+      if (g.guesses.length) {
+        const meta = {}, gd = {};
+        g.guesses.forEach(x => { meta[x.name] = x; gd[x.name] = x.cards; });
+        res = HC.analyse(gd, names, opts);
+        Object.assign(res, { pool: g.guesses.length, poolMeta: meta, guessed: true,
+          fragments: rows.filter(r => r.kind === "fragment").length, knownDecks: rows.filter(r => r.kind === "deck").length });
+      } else res.guessNote = g.note;
+    }
     H.last = res; drawResult();
   }, 30);
 }
@@ -142,9 +161,11 @@ function drawHandBar() {
   const hand = r.best_hand ? r.best_hand.cards.slice().sort((a, b) => (r.hand[b] || 0) - (r.hand[a] || 0)) : ranked.slice(0, HC.HAND_SIZE).map(x => x[0]);
   const others = ranked.filter(([c]) => !hand.includes(c)).slice(0, 6);
   const nT = confirmedTurns().length;
-  const odds = `<div class="hbs"><div class="dbh"><b>Which deck?</b> <span class="dim">${r.decks.length} of ${r.pool} candidates fit, after ${nT} turn${nT > 1 ? "s" : ""}</span></div>` +
+  const odds = `<div class="hbs"><div class="dbh">${r.guessed ? `<b>Guessed decks</b> <span class="dim">no known deck holds these cards, after ${nT} turn${nT > 1 ? "s" : ""}</span>`
+      : `<b>Which deck?</b> <span class="dim">${r.decks.length} of ${r.pool} candidates fit, after ${nT} turn${nT > 1 ? "s" : ""}</span>`}</div>` +
     r.decks.slice(0, 8).map(d => { const m = r.poolMeta[d.name], open = H.openDeck === d.name;
-      return `<div class="drow2 ${open ? "on" : ""}" data-dk="${esc(d.name)}"><div class="nm">${esc(m.title)}<small>${facName(m.faction)} · ${esc(m.archetype)}</small></div><div class="track"><i style="width:${d.p * 100}%"></i></div><div class="v">${pct(d.p)}</div></div>` +
+      return `<div class="drow2 ${open ? "on" : ""}" data-dk="${esc(d.name)}"><div class="nm">${esc(m.title)}<small>${facName(m.faction)} · ${esc(r.guessed ? m.basis : m.archetype)}</small></div>` +
+        (r.guessed ? `<div class="track"></div><div class="v dim">guess</div></div>` : `<div class="track"><i style="width:${d.p * 100}%"></i></div><div class="v">${pct(d.p)}</div></div>`) +
         (open ? `<div class="mini" style="margin:2px 6px 8px">${d.cards.map(c => `<span class="${seen.has(c) ? "seen" : ""}">${esc(c)}<b>${pct(r.hand[c] || 0)}</b></span>`).join("")}</div>` : ""); }).join("") +
     (r.decks.length > 8 ? `<p class="hint left">+ ${r.decks.length - 8} less likely decks</p>` : "") + `</div>`;
   bar.onclick = e => { const d = e.target.closest("[data-dk]"); if (d) { H.openDeck = H.openDeck === d.dataset.dk ? null : d.dataset.dk; drawHandBar(); } };
@@ -160,10 +181,13 @@ function drawResult() {
   if (!r) { box.innerHTML = `<p class="hint">${n ? "No card seen yet: nothing to work from." : "Add the cards of turn 1 and tap Done."}</p>`; return; }
   const seen = new Set(confirmedTurns().flat().map(nameOf));
   if (!r.decks.length) {
-    box.innerHTML = `<div class="note"><b>No candidate deck fits.</b> ${r.candidates ? `${r.candidates} deck(s) hold all the cards seen, but none can have produced these plays with a cycle every turn.` : "No candidate deck holds all these cards."} The opponent has a deck this tool does not know, or a card is wrong (use Edit on a turn). Create a deck from the played cards to remember it.</div>`;
+    const why = r.guessed ? "No known deck holds all these cards, and none of the guessed decks can have produced these plays with a cycle every turn."
+      : r.candidates ? `${r.candidates} deck(s) hold all the cards seen, but none can have produced these plays with a cycle every turn.` : "No candidate deck holds all these cards.";
+    box.innerHTML = `<div class="note"><b>No candidate deck fits.</b> ${why}${r.guessNote ? ` No deck could be guessed: ${esc(r.guessNote)}.` : ""} The opponent has a deck this tool does not know, or a card is wrong (use Edit on a turn). Create a fragment or a deck from the played cards to remember it.</div>`;
     return;
   }
   let h = "";
+  if (r.guessed) h += `<div class="note"><b>No known deck holds these cards: these are guesses.</b> Each guess is the cards seen plus cards chosen from your ${r.fragments} saved fragment${r.fragments === 1 ? "" : "s"} and ${r.knownDecks} known decks (which cards go together). The cards not seen yet are not facts, so the hand estimate is only as good as the guess. <b>Create fragment</b> after the game improves the next one.</div>`;
   h += `<h3>After its next cycle</h3><div class="mini">${Object.entries(r.next).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c, p]) => `<span class="${seen.has(c) ? "seen" : ""}">${esc(c)}<b>${pct(p)}</b></span>`).join("")}</div>`;
   h += `<h3>Cards seen: in the hand again?</h3><div class="mini">${Object.entries(r.seen).sort((a, b) => b[1].p_hand - a[1].p_hand).map(([c, v]) => `<span class="seen">${esc(c)}<b>${pct(v.p_hand)}</b></span>`).join("")}</div>
     <p class="hint left">Gold: seen played, so in the deck for certain. Assumes the opponent cycles a card every turn; estimated from simulated games, so small percentages move a little between runs.</p>`;

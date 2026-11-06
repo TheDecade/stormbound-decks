@@ -9,6 +9,10 @@ iPad-friendly web app to save Stormbound decklists while you play. Open it in Sa
 - Data lives in the browser (localStorage). Use **Export backup** / **Import backup** on the deck list to keep a copy.
 - **Battle tools** (hand calculator): add the cards an opponent played, turn by turn. **Create deck from played cards** opens a menu
   with **Create fragment**: it keeps the cards as an incomplete list for statistics (not a deck) and needs only the faction. Tap it
-  again in the same game to update the fragment. **Fragments (N)** on the deck list shows them and can delete a wrong one.
+  again in the same game to update the fragment. **Fragments (N)** on the deck list shows them, can delete a wrong one, and has a
+  **Statistics** view (most used cards; tap a card to see what it goes with).
+- **Guessed decks:** when the opponent plays cards that no known deck holds, the calculator builds guessed decks from your fragments
+  and the known decks (`fragments.js`, a port of the Stormbound project's `stormbound/fragments.py`) and works out the hand on them,
+  marked as a guess. The checkbox **Guess a deck when none fits** switches it off. It only uses the fragments saved on this device.
 - **Export for PC** shares or downloads one file with all saved decks and all fragments; on the PC,
   `python scripts/import_ipad_decks.py` in the Stormbound project reads it (decks to `data/decks`, fragments to `data/fragments`).
