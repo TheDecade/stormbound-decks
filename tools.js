@@ -2,11 +2,11 @@
 /* Battle tools page: hand calculator (port of the Stormbound project's /tools page) + "create a deck from the played cards". */
 const HKEY = "sb-hand-v1";
 let BUNDLED = null;
-let T = { turns: [{ cards: [], done: false }], off: [], cycle: "first", game: uid(), guess: true };  // game: one id a game, so saving its fragment again updates it; guess: build decks from the fragments when no known deck fits
+let T = { turns: [{ cards: [], done: false }], off: [], cycle: "first", game: uid(), guess: true, faction: "" };  // game: one id a game, so saving its fragment again updates it; guess: build decks from the fragments when no known deck fits
 let H = { last: null, seq: 0, openDeck: null, tab: "in" };
 try {
   const j = JSON.parse(localStorage.getItem(HKEY) || "null");
-  if (j && Array.isArray(j.turns) && j.turns.length) T = { turns: j.turns, off: j.off || [], cycle: j.cycle || "first", game: j.game || uid(), guess: j.guess !== false };
+  if (j && Array.isArray(j.turns) && j.turns.length) T = { turns: j.turns, off: j.off || [], cycle: j.cycle || "first", game: j.game || uid(), guess: j.guess !== false, faction: FACTIONS[j.faction] ? j.faction : "" };
 } catch (e) {}
 const hsave = () => { try { localStorage.setItem(HKEY, JSON.stringify(T)); } catch (e) {} };
 const pct = (x, d = 0) => (100 * x).toFixed(d) + "%";
@@ -31,8 +31,8 @@ async function loadBundled() {
 /** name -> {title, faction, archetype, cards (card names)}: the bundled decks plus your own saved 12-card decks. */
 function candidatePool() {
   const out = {};
-  for (const [k, d] of Object.entries(BUNDLED || {})) out[k] = d;
-  for (const d of state.decks) if (d.saved !== false && d.cards.length === DECK_SIZE)
+  for (const [k, d] of Object.entries(BUNDLED || {})) if (!T.faction || d.faction === T.faction) out[k] = d;  // the opponent faction is public: only its decks
+  for (const d of state.decks) if (d.saved !== false && d.cards.length === DECK_SIZE && (!T.faction || d.faction === T.faction))
     out["u:" + d.id] = { title: "★ " + (d.name || "Untitled"), faction: d.faction, archetype: d.archetype || "—", cards: d.cards.map(i => BYID[i].name) };
   return out;
 }
@@ -79,7 +79,7 @@ function drawDeckBar() {
 function drawInput() {
   drawDeckBar();
   const box = $("#tin"); if (!box) return;
-    let h = `<p class="hint left">Add the cards the opponent played each turn, then tap <b>Done</b>. Cards seen played are in its deck for sure.</p><div id="turns">`;
+    let h = `<div class="field"><label>Opponent faction (public at the start of a game)</label><div class="factions">${Object.entries(FACTIONS).map(([k, n]) => `<button type="button" class="f-${k} ${T.faction === k ? "sel" : ""}" data-fac="${k}">${n}</button>`).join("")}</div></div><p class="hint left">Add the cards the opponent played each turn, then tap <b>Done</b>. Cards seen played are in its deck for sure.</p><div id="turns">`;
   T.turns.forEach((t, i) => {
     h += `<div class="turn ${t.done ? "done" : ""}"><div class="thead"><b>Turn ${i + 1}</b><div class="tchips">` +
       (t.cards.map((id, k) => `<span class="pick f-${BYID[id].faction}"><span class="m">${BYID[id].mana}</span>${esc(nameOf(id))}${fxAnswer(t, id) === "yes" ? " ↩" : ""}${t.done ? "" : `<button data-rm="${i}:${k}" aria-label="remove">✕</button>`}</span>`).join("") ||
@@ -104,8 +104,9 @@ function drawInput() {
   const q = $("#tq");
   if (q) q.addEventListener("input", () => drawSugg(q));
   box.onclick = e => {
-    const rm = e.target.closest("[data-rm]"), dn = e.target.closest("[data-done]"), sg = e.target.closest("[data-add]"), fx = e.target.closest("[data-fx]");
-    if (rm) { const [i, k] = rm.dataset.rm.split(":").map(Number), t = T.turns[i]; if (t.fx) delete t.fx[t.cards[k]]; t.cards.splice(k, 1); hsave(); drawInput(); }
+    const ff = e.target.closest("[data-fac]"), rm = e.target.closest("[data-rm]"), dn = e.target.closest("[data-done]"), sg = e.target.closest("[data-add]"), fx = e.target.closest("[data-fx]");
+    if (ff) { T.faction = T.faction === ff.dataset.fac ? "" : ff.dataset.fac; hsave(); drawInput(); recalc(); }
+    else if (rm) { const [i, k] = rm.dataset.rm.split(":").map(Number), t = T.turns[i]; if (t.fx) delete t.fx[t.cards[k]]; t.cards.splice(k, 1); hsave(); drawInput(); }
     else if (fx) {
       const [id, ans] = fx.dataset.fx.split(":"), t = T.turns.find(x => !x.done);
       t.fx = t.fx || {}; t.fx[id] = ans; hsave(); drawInput(); $("#tq")?.focus();
@@ -124,13 +125,13 @@ function drawInput() {
     T.turns = T.turns.slice(0, done.length - 1); T.turns.push({ cards: [], done: false }); hsave(); drawInput(); recalc();
   };
   $("#hnew").onclick = () => { if (playedCards().length && !confirm("Start a new game? The cards entered are cleared.")) return;
-    T.turns = [{ cards: [], done: false }]; T.game = uid(); H.openDeck = null; hsave(); drawInput(); recalc(); };
+    T.turns = [{ cards: [], done: false }]; T.game = uid(); T.faction = ""; H.openDeck = null; hsave(); drawInput(); recalc(); };
   $("#hmake").onclick = makeDeckDialog;
 }
 function drawSugg(q) {
   const t = T.turns.find(x => !x.done), toks = norm(q.value).split(/\s+/).filter(Boolean), sg = $("#sugg");
   if (!toks.length) { sg.innerHTML = ""; return; }
-  const list = CARDS.filter(c => !t.cards.includes(c.id) && toks.every(k => norm(c.name + " " + c.units.join(" ")).includes(k)))
+  const list = CARDS.filter(c => !t.cards.includes(c.id) && (!T.faction || c.faction === "neutral" || c.faction === T.faction) && toks.every(k => norm(c.name + " " + c.units.join(" ")).includes(k)))
     .sort((a, b) => (norm(a.name).startsWith(toks[0]) ? 0 : 1) - (norm(b.name).startsWith(toks[0]) ? 0 : 1) || a.name.localeCompare(b.name)).slice(0, 8);
   sg.innerHTML = list.map(c => `<div class="sg" data-add="${c.id}"><img src="${thumb(c)}" alt="" width="36" height="36"><span class="m">${c.mana}</span><span class="nm">${esc(c.name)}</span><small>${facName(c.faction)}</small></div>`).join("")
     || `<div class="hint">No match</div>`;
@@ -148,7 +149,7 @@ function recalc() {
     let res = HC.analyse(decks, names, opts);
     res.pool = Object.keys(decks).length; res.poolMeta = pool;
     if (!res.candidates && T.guess !== false) {  // no known deck holds the cards seen: guess decks from the fragments and the known decks
-      const rows = corpusRows(pool), g = FR.guessDecks(names.flat(), CARDS, rows, { labels: FACTIONS });
+      const rows = corpusRows(pool).filter(r => !T.faction || !r.faction || r.faction === T.faction), g = FR.guessDecks(names.flat(), CARDS, rows, { labels: FACTIONS });
       if (g.guesses.length) {
         const meta = {}, gd = {};
         g.guesses.forEach(x => { meta[x.name] = x; gd[x.name] = x.cards; });
@@ -218,7 +219,7 @@ function makeDeckDialog() {
   if (!ids.length) return toast("No card played yet");
   const facs = [...new Set(ids.map(i => BYID[i].faction).filter(f => f !== "neutral"))];
   const top = H.last && H.last.decks && H.last.decks[0];
-  const v = { faction: facs.length === 1 ? facs[0] : (top ? H.last.poolMeta[top.name].faction : ""), name: "", archetype: "", type: "" };
+  const v = { faction: facs.length === 1 ? facs[0] : T.faction || (top ? H.last.poolMeta[top.name].faction : ""), name: "", archetype: "", type: "" };
   const cut = ids.length > DECK_SIZE;
   const o = openModal(`<div class="modal"><h2>Deck from played cards (${Math.min(ids.length, DECK_SIZE)})</h2>
     <div class="mini" style="margin-bottom:12px">${ids.map(i => `<span class="seen">${esc(nameOf(i))}<b>${BYID[i].mana}</b></span>`).join("")}</div>
