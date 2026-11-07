@@ -233,3 +233,7 @@ details>summary{padding:8px 0;font-weight:600;color:var(--muted)}
 .vcurve span{position:absolute;bottom:0;font-size:11px;color:var(--muted)}
 .chk{display:flex;gap:8px;align-items:center;cursor:pointer}
 .chk input{-webkit-appearance:checkbox;appearance:auto;width:20px;height:20px;padding:0;flex:none;accent-color:var(--accent)}
+.fxq{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 2px;padding:8px 10px;border-radius:10px;background:var(--panel);border-left:3px solid var(--accent);font-size:14px}
+.fxq > span{flex:1;min-width:180px}
+.fxq.done{border-left-color:var(--ok);color:var(--muted)}
+.fxq button{padding:6px 12px;font-size:14px}

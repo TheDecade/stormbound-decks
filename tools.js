@@ -11,6 +11,16 @@ try {
 const hsave = () => { try { localStorage.setItem(HKEY, JSON.stringify(T)); } catch (e) {} };
 const pct = (x, d = 0) => (100 * x).toFixed(d) + "%";
 const confirmedTurns = () => { const out = []; for (const t of T.turns) { if (!t.done) break; out.push(t.cards); } return out; };
+/* Cards that change the hand when played. The calculator asks about them when the card is added to a turn:
+   "return": the card goes back to the hand (it never reaches the deck), so the opponent keeps it for certain. */
+const HAND_FX = {
+  "Counselor Ahmi": { kind: "return", q: "No surrounding units, so it went back to the hand?", yes: "back in its hand", no: "not back in its hand" },
+};
+const fxOf = id => HAND_FX[BYID[id].name];
+const fxAnswer = (t, id) => (t.fx || {})[id];
+const pendingFx = t => t.cards.filter(id => fxOf(id) && !fxAnswer(t, id));
+/** For every confirmed turn: the names of the cards that went back to the hand when played. */
+const confirmedBack = () => { const out = []; for (const t of T.turns) { if (!t.done) break; out.push(t.cards.filter(id => fxAnswer(t, id) === "yes").map(id => BYID[id].name)); } return out; };
 const playedCards = () => [...new Set(T.turns.flatMap(t => t.cards))].filter(id => BYID[id]);
 const facName = f => FACTIONS[f] || "Neutral";
 
@@ -72,9 +82,12 @@ function drawInput() {
     let h = `<p class="hint left">Add the cards the opponent played each turn, then tap <b>Done</b>. Cards seen played are in its deck for sure.</p><div id="turns">`;
   T.turns.forEach((t, i) => {
     h += `<div class="turn ${t.done ? "done" : ""}"><div class="thead"><b>Turn ${i + 1}</b><div class="tchips">` +
-      (t.cards.map((id, k) => `<span class="pick f-${BYID[id].faction}"><span class="m">${BYID[id].mana}</span>${esc(nameOf(id))}${t.done ? "" : `<button data-rm="${i}:${k}" aria-label="remove">✕</button>`}</span>`).join("") ||
+      (t.cards.map((id, k) => `<span class="pick f-${BYID[id].faction}"><span class="m">${BYID[id].mana}</span>${esc(nameOf(id))}${fxAnswer(t, id) === "yes" ? " ↩" : ""}${t.done ? "" : `<button data-rm="${i}:${k}" aria-label="remove">✕</button>`}</span>`).join("") ||
         `<span class="dim">${t.done ? "no card seen" : "no card yet"}</span>`) +
       `</div><button class="chip ${t.done ? "" : "on"}" data-done="${i}">${t.done ? "Edit" : "Done"}</button></div>`;
+    if (!t.done) h += t.cards.filter(fxOf).map(id => { const fx = fxOf(id), a = fxAnswer(t, id);
+      return a ? `<div class="fxq done"><span>${a === "yes" ? "↩" : "•"} ${esc(nameOf(id))}: ${esc(a === "yes" ? fx.yes : fx.no)}</span><button data-fx="${id}:${a === "yes" ? "no" : "yes"}">Change</button></div>`
+        : `<div class="fxq"><span><b>${esc(nameOf(id))}</b>: ${esc(fx.q)}</span><button class="primary" data-fx="${id}:yes">Yes, back in hand</button><button data-fx="${id}:no">No</button></div>`; }).join("");
     if (!t.done) h += `<input class="tq" id="tq" type="search" placeholder="Search a card the opponent played…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"><div id="sugg"></div>`;
     h += `</div>`;
   });
@@ -91,10 +104,14 @@ function drawInput() {
   const q = $("#tq");
   if (q) q.addEventListener("input", () => drawSugg(q));
   box.onclick = e => {
-    const rm = e.target.closest("[data-rm]"), dn = e.target.closest("[data-done]"), sg = e.target.closest("[data-add]");
-    if (rm) { const [i, k] = rm.dataset.rm.split(":").map(Number); T.turns[i].cards.splice(k, 1); hsave(); drawInput(); }
-    else if (dn) {
+    const rm = e.target.closest("[data-rm]"), dn = e.target.closest("[data-done]"), sg = e.target.closest("[data-add]"), fx = e.target.closest("[data-fx]");
+    if (rm) { const [i, k] = rm.dataset.rm.split(":").map(Number), t = T.turns[i]; if (t.fx) delete t.fx[t.cards[k]]; t.cards.splice(k, 1); hsave(); drawInput(); }
+    else if (fx) {
+      const [id, ans] = fx.dataset.fx.split(":"), t = T.turns.find(x => !x.done);
+      t.fx = t.fx || {}; t.fx[id] = ans; hsave(); drawInput(); $("#tq")?.focus();
+    } else if (dn) {
       const i = +dn.dataset.done, t = T.turns[i];
+      if (!t.done && pendingFx(t).length) return toast(`${nameOf(pendingFx(t)[0])}: answer the question first`);
       if (t.done) { t.done = false; T.turns = T.turns.slice(0, i + 1); }
       else { t.done = true; if (i === T.turns.length - 1) T.turns.push({ cards: [], done: false }); }
       hsave(); drawInput(); recalc(); if (!t.done) $("#tq")?.focus();
@@ -126,7 +143,7 @@ function recalc() {
   $("#tout") && ($("#tout").innerHTML = `<p class="hint">thinking…</p>`);
   setTimeout(() => {
     if (my !== H.seq) return;
-    const pool = candidatePool(), decks = {}, names = turns.map(t => t.map(nameOf)), opts = { cycleFirst: T.cycle !== "after" };
+    const pool = candidatePool(), decks = {}, names = turns.map(t => t.map(nameOf)), opts = { cycleFirst: T.cycle !== "after", returned: confirmedBack() };
     for (const [n, d] of Object.entries(pool)) decks[n] = d.cards;
     let res = HC.analyse(decks, names, opts);
     res.pool = Object.keys(decks).length; res.poolMeta = pool;

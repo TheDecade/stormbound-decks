@@ -11,6 +11,8 @@ iPad-friendly web app to save Stormbound decklists while you play. Open it in Sa
   with **Create fragment**: it keeps the cards as an incomplete list for statistics (not a deck) and needs only the faction. Tap it
   again in the same game to update the fragment. **Fragments (N)** on the deck list shows them, can delete a wrong one, and has a
   **Statistics** view (most used cards; tap a card to see what it goes with).
+- **Cards that change the hand:** when you add *Counselor Ahmi* the calculator asks "No surrounding units, so it went back to the hand?".
+  Yes keeps it in the opponent's hand for certain (100% right after that turn; the chip shows ↩). Done waits for the answer.
 - **Guessed decks:** when the opponent plays cards that no known deck holds, the calculator builds guessed decks from your fragments
   and the known decks (`fragments.js`, a port of the Stormbound project's `stormbound/fragments.py`) and works out the hand on them,
   marked as a guess. The checkbox **Guess a deck when none fits** switches it off. It only uses the fragments saved on this device.

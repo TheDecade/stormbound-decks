@@ -1,7 +1,8 @@
 "use strict";
 /* Hand calculator engine: a JavaScript port of stormbound/hand_calc.py (the Stormbound project).
    Same draw rules (a played or cycled card goes back with weight 1, every other card w -> 1.6w + 100, weighted draws,
-   hand refilled to 4) and the same importance-sampling simulation. */
+   hand refilled to 4) and the same importance-sampling simulation. A card that goes back to the hand when played (Counselor Ahmi)
+   stays in the hand (`returned`). */
 const HC = (() => {
   const HAND_SIZE = 4, WEIGHT_MULT = 1.6, WEIGHT_ADD = 100, BOOST = 1.5;
 
@@ -45,7 +46,9 @@ const HC = (() => {
     hand.push(drawn);
     return factor * f;
   }
-  function particle(cards, turns, rng, cycleFirst, later) {
+  /* back[t]: the cards of turn t that went back to the hand when played (Counselor Ahmi with no surrounding units): they stay in
+     the hand, never reach the deck, and the other cards of the deck are not reweighed for them. */
+  function particle(cards, turns, rng, cycleFirst, later, back) {
     const order = cards.slice();
     for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
     const deck = order.slice(), weights = []; let w = 1;
@@ -60,16 +63,18 @@ const HC = (() => {
         weight *= f;
       }
       if (seen.some(c => !hand.includes(c))) return null;
-      for (const c of seen) { hand.splice(hand.indexOf(c), 1); returnToDeck(deck, weights, c); }
+      for (const c of seen) { if (back[t].has(c)) continue; hand.splice(hand.indexOf(c), 1); returnToDeck(deck, weights, c); }
       if (!cycleFirst) weight *= cycle(hand, deck, weights, new Set(), later[t + 1], later[t + 1], rng, new Set());
       while (hand.length < HAND_SIZE && deck.length) { const [c, f] = draw(deck, weights, later[t + 1], rng, null); hand.push(c); weight *= f; }
     }
     return { weight, hand, deck, weights };
   }
 
-  /** decks: {name: [cards]}; turns: [[cards seen]] -> {decks:[{name,p,cards}], hand, next, best_hand, seen, turns, candidates} */
-  function analyse(decks, turns, { n = 6000, seed = 1, cycleFirst = true, maxTotal = 60000 } = {}) {
+  /** decks: {name: [cards]}; turns: [[cards seen]]; returned: [[cards of that turn that went back to the hand]]
+      -> {decks:[{name,p,cards}], hand, next, best_hand, seen, turns, candidates} */
+  function analyse(decks, turns, { n = 6000, seed = 1, cycleFirst = true, maxTotal = 60000, returned = [] } = {}) {
     turns = turns.map(t => t.filter(Boolean));
+    const back = turns.map((t, i) => new Set((returned[i] || []).filter(c => t.includes(c))));
     const seenAll = new Set(turns.flat());
     const cand = {};
     for (const [name, cards] of Object.entries(decks)) if ([...seenAll].every(c => cards.includes(c))) cand[name] = cards;
@@ -80,7 +85,7 @@ const HC = (() => {
     for (const name of names) {
       let total = 0; const mh = {}, mn = {}, ms = {};
       for (let it = 0; it < n; it++) {
-        const p = particle(cand[name], turns, rng, cycleFirst, later);
+        const p = particle(cand[name], turns, rng, cycleFirst, later, back);
         if (!p || p.weight <= 0) continue;
         const { weight: w, hand, deck, weights } = p;
         total += w;

@@ -76,13 +76,14 @@ function renderList() {
     h += `</details>`;
   }
   const nSaved = state.decks.filter(d => d.saved !== false).length, nFrag = state.fragments.length;
-  h += `<div class="footer-tools"><button id="expc">Export for PC (${nSaved} deck${nSaved === 1 ? "" : "s"}, ${nFrag} fragment${nFrag === 1 ? "" : "s"})</button><button id="frags">Fragments (${nFrag})</button><button id="exp">Export backup</button><button id="imp">Import deck / backup</button></div></div>
+  h += `<div class="footer-tools"><button id="expc">Export for PC (${nSaved} deck${nSaved === 1 ? "" : "s"}, ${nFrag} fragment${nFrag === 1 ? "" : "s"})</button><button id="gh">Push to GitHub</button><button id="frags">Fragments (${nFrag})</button><button id="exp">Export backup</button><button id="imp">Import deck / backup</button></div></div>
     <button class="primary fab" id="new">+ New deck</button>`;
   $("#app").innerHTML = h;
   $("#new").onclick = pickFaction;
   $("#tools").onclick = () => { location.hash = "#/tools"; };
   $("#exp").onclick = exportBackup;
   $("#expc").onclick = () => exportForPc(state.decks.filter(d => d.saved !== false), state.fragments);
+  $("#gh").onclick = githubDialog;
   $("#frags").onclick = fragmentsDialog;
   $("#imp").onclick = importBackup;
   $("#app").querySelectorAll("details").forEach(el => el.addEventListener("toggle", () => {
@@ -117,6 +118,72 @@ async function exportForPc(decks, frags = []) {
   const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = fname;
   document.body.appendChild(a); a.click(); a.remove();
   toast(`Saved ${fname}`);
+}
+
+/* ---------- push to GitHub: only what is new (decks as files, fragments merged by game id) ---------- */
+const GH_KEY = "sb-gh";
+const ghCfg = () => { try { return JSON.parse(localStorage.getItem(GH_KEY)) || {}; } catch { return {}; } };
+const b64 = s => { let b = ""; for (const x of new TextEncoder().encode(s)) b += String.fromCharCode(x); return btoa(b); };
+const unb64 = s => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\n/g, "")), c => c.charCodeAt(0)));
+async function ghApi(cfg, method, path, body) {
+  const r = await fetch(`https://api.github.com/repos/${cfg.repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}`, {
+    method, headers: { Authorization: "Bearer " + cfg.token, Accept: "application/vnd.github+json", "Content-Type": "application/json" }, body: body && JSON.stringify(body) });
+  if (r.status === 404 && method === "GET") return null;
+  if (!r.ok) throw new Error(`GitHub ${r.status}: ${((await r.json().catch(() => ({}))).message) || r.statusText}`);
+  return r.json();
+}
+/** Read a JSON file of the repo -> {data, sha} (null if missing). */
+async function ghRead(cfg, path) { const j = await ghApi(cfg, "GET", path); return j && { data: JSON.parse(unb64(j.content)), sha: j.sha }; }
+const ghWrite = (cfg, path, data, sha, msg) => ghApi(cfg, "PUT", path, { message: msg, content: b64(JSON.stringify(data, null, 2) + "\n"), sha: sha || undefined });
+const listKey = a => a.map(norm).sort().join("|");
+
+async function pushToGithub(cfg, log) {
+  const decks = state.decks.filter(d => d.saved !== false), r = { newDeck: 0, newVer: 0, same: 0, newFrag: 0, upFrag: 0, sameFrag: 0 };
+  for (const d of decks) {
+    const f = deckToFile(d), path = `decks/${f.faction}/${f.archetype || "unsorted"}/${f.name}.json`;
+    log(`Deck ${d.name}…`);
+    const old = await ghRead(cfg, path);
+    if (!old) { await ghWrite(cfg, path, f, null, `Add deck ${d.name}`); r.newDeck++; continue; }
+    const vs = Object.keys(old.data).filter(k => /^v\d+$/.test(k)).sort((a, b) => a.slice(1) - b.slice(1));
+    if (vs.some(k => listKey(old.data[k]) === listKey(f.v1))) { r.same++; continue; }  // this list is already a version
+    const next = "v" + (+vs[vs.length - 1].slice(1) + 1);
+    old.data[next] = f.v1; old.data.card_pool = [...new Set([...(old.data.card_pool || []), ...f.v1])];
+    await ghWrite(cfg, path, old.data, old.sha, `Add ${next} of deck ${d.name}`); r.newVer++;
+  }
+  if (state.fragments.length) {
+    log("Fragments…");
+    const old = await ghRead(cfg, "fragments.json"), rows = old ? old.data.fragments || [] : [], key = x => x.game || x.id;
+    const by = new Map(rows.map(x => [key(x), x]));
+    for (const fr of state.fragments.map(fragToFile)) {
+      const had = by.get(key(fr));
+      if (!had) { by.set(key(fr), fr); r.newFrag++; }
+      else if (listKey(had.cards) === listKey(fr.cards)) r.sameFrag++;
+      else { by.set(key(fr), fr); r.upFrag++; }  // the same game, seen further
+    }
+    if (r.newFrag || r.upFrag) await ghWrite(cfg, "fragments.json", { format: "stormbound-ipad-decks", fragments: [...by.values()] }, old && old.sha, `Fragments: +${r.newFrag} new, ${r.upFrag} updated`);
+  }
+  return r;
+}
+function githubDialog() {
+  const c = ghCfg();
+  const o = openModal(`<div class="modal"><h2>Push to GitHub</h2>
+    <p class="hint left">Adds only what is new: a deck with the same name and list is skipped, with another list it becomes its next version (v2, v3…); a fragment is matched by its game, so the same game is skipped or updated.</p>
+    <div class="field"><label>Repository (owner/name)</label><input id="ghr" value="${esc(c.repo || "TheDecade/stormbound-data")}" autocapitalize="off" autocorrect="off"></div>
+    <div class="field"><label>Token (fine-grained, this repo only, Contents: read and write)</label><input id="ght" type="password" value="${esc(c.token || "")}" autocapitalize="off" autocorrect="off"></div>
+    <div class="hint left" id="ghs"></div>
+    <div class="row"><button id="cancel">Close</button><button class="primary" id="go">Push now</button></div></div>`);
+  $("#cancel").onclick = () => { o.hidden = true; };
+  $("#go").onclick = async () => {
+    const cfg = { repo: $("#ghr").value.trim(), token: $("#ght").value.trim() };
+    if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo) || !cfg.token) return ($("#ghs").textContent = "Enter the repository and the token.");
+    try { localStorage.setItem(GH_KEY, JSON.stringify(cfg)); } catch {}
+    $("#go").disabled = true;
+    try {
+      const r = await pushToGithub(cfg, m => { $("#ghs").textContent = m; });
+      $("#ghs").innerHTML = `Done. Decks: ${r.newDeck} new, ${r.newVer} new version${r.newVer === 1 ? "" : "s"}, ${r.same} already there. Fragments: ${r.newFrag} new, ${r.upFrag} updated, ${r.sameFrag} already there.`;
+    } catch (e) { $("#ghs").textContent = "Failed: " + e.message; }
+    $("#go").disabled = false;
+  };
 }
 
 function exportBackup() {
