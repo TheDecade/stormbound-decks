@@ -77,7 +77,7 @@ function drawDeckBar() {
       : `<div class="dim dbe">No card yet: the cards you add as played appear here.</div>`);
 }
 function drawInput() {
-  drawDeckBar();
+  drawDeckBar(); drawHandBar();
   const box = $("#tin"); if (!box) return;
     let h = `<div class="field"><label>Opponent faction (public at the start of a game)</label><div class="factions">${Object.entries(FACTIONS).map(([k, n]) => `<button type="button" class="f-${k} ${T.faction === k ? "sel" : ""}" data-fac="${k}">${n}</button>`).join("")}</div></div><p class="hint left">Add the cards the opponent played each turn, then tap <b>Done</b>. Cards seen played are in its deck for sure.</p><div id="turns">`;
   T.turns.forEach((t, i) => {
@@ -95,10 +95,10 @@ function drawInput() {
     <select id="hcycle"><option value="first">Cycle: before it plays</option><option value="after">Cycle: after it plays</option></select></div>
     <button class="primary wide" id="hmake">Create deck from played cards (${playedCards().length})</button>
     <p class="hint left">${esc(poolInfo())} Fragments saved: ${state.fragments.length}. An opponent with another deck is guessed from them.</p>
-    <label class="hint left chk"><input type="checkbox" id="hguess"> Guess a deck when none fits</label>`;
+    <label class="hint left chk"><input type="checkbox" id="hguess"> Show the guessed decks</label>`;
   box.innerHTML = h;
   $("#hguess").checked = T.guess !== false;
-  $("#hguess").onchange = e => { T.guess = e.target.checked; hsave(); recalc(); };
+  $("#hguess").onchange = e => { T.guess = e.target.checked; hsave(); drawHandBar(); };
   $("#hcycle").value = T.cycle;
   $("#hcycle").onchange = e => { T.cycle = e.target.value; hsave(); recalc(); };
   const q = $("#tq");
@@ -148,7 +148,7 @@ function recalc() {
     for (const [n, d] of Object.entries(pool)) decks[n] = d.cards;
     let res = HC.analyse(decks, names, opts);
     res.pool = Object.keys(decks).length; res.poolMeta = pool;
-    if (!res.candidates && T.guess !== false) {  // no known deck holds the cards seen: guess decks from the fragments and the known decks
+    if (!res.candidates) {  // no known deck holds the cards seen: guess decks from the fragments and the known decks
       const rows = corpusRows(pool).filter(r => !T.faction || !r.faction || r.faction === T.faction), g = FR.guessDecks(names.flat(), CARDS, rows, { labels: FACTIONS });
       if (g.guesses.length) {
         const meta = {}, gd = {};
@@ -164,33 +164,106 @@ function recalc() {
 function probCard(name, p, seen) {
   const c = CARDS.find(x => x.name === name);
   const kind = c.units.length ? c.units.join(", ") : c.type;
-  return `<div class="pcard ${seen ? "seen" : ""}"><div class="pimg"><img src="${thumb(c)}" alt="" width="256" height="256"><span class="cm">${c.mana}</span>` +
+  return `<div class="pcard ${seen ? "seen" : ""}" data-cid="${c.id}"><div class="pimg"><img src="${thumb(c)}" alt="" width="256" height="256" draggable="false"><span class="cm">${c.mana}</span>` +
     (c.str != null ? `<span class="cs">${c.str}</span>` : "") + (c.spd ? `<span class="cv">${c.spd}</span>` : "") +
     `<span class="cn">${esc(name)}<small>${esc(kind)}</small></span></div>
     <div class="pbar"><i style="width:${Math.min(100, p * 100)}%"></i><span>${pct(p)}</span></div></div>`;
 }
+/** Three guessed decks from the cards seen (every card played, this turn too), the known decks and the fragments; each card has the chance it is in the deck. */
+function guessedDecks() {
+  const seen = playedCards().map(nameOf);
+  if (!seen.length) return { guesses: [], note: "" };
+  const rows = corpusRows(candidatePool()).filter(r => !T.faction || !r.faction || r.faction === T.faction);
+  const g = FR.guessDecks(seen, CARDS, rows, { k: 3, labels: FACTIONS, faction: T.faction || null });
+  const corpus = new FR.Corpus(rows);
+  if (g.guesses.length && g.guesses.length < 3) {  // too little data for three different decks: vary the first one, leaving out the cards it is surest of
+    const first = g.guesses[0], f = first.faction, sc = corpus.scope(f), have = new Set(g.guesses.map(x => x.cards.slice().sort().join("|")));
+    const pool = CARDS.filter(c => c.rarity && (c.faction === f || c.faction === "neutral") && !seen.includes(c.name)).map(c => c.name);
+    const skip = new Set();
+    for (const x of g.guesses) x.cards.filter(c => !seen.includes(c)).slice(0, 4).forEach(c => skip.add(c));
+    for (let tries = 0; tries < 6 && g.guesses.length < 3; tries++) {
+      const deck = FR.fill(seen, pool.filter(c => !skip.has(c)), sc), key = deck.slice().sort().join("|");
+      deck.filter(c => !seen.includes(c)).slice(0, 4).forEach(c => skip.add(c));
+      if (have.has(key)) continue;
+      have.add(key);
+      g.guesses.push({ name: `guess:${f}:v${tries}`, faction: f, archetype: "Guess", cards: deck, basis: "another likely build, leaving out the cards the first guess is surest of" });
+    }
+  }
+  g.guesses = g.guesses.slice(0, 3).map((x, i) => {
+    const sc = corpus.scope(x.faction);
+    return { ...x, title: "Guess " + (i + 1), list: x.cards.map(c => ({ name: c, p: seen.includes(c) ? 1 : sc.inclusion(seen, c) }))
+      .sort((a, b) => b.p - a.p || (a.name < b.name ? -1 : 1)) };
+  });
+  return g;
+}
+const cidOf = name => (CARDS.find(c => c.name === name) || {}).id;
+function addPlayed(id) {
+  const t = T.turns.find(x => !x.done); if (!t) return;
+  const n = T.turns.indexOf(t) + 1;
+  if (t.cards.includes(id)) return toast(`${nameOf(id)} is already in turn ${n}`);
+  t.cards.push(id); hsave(); drawInput(); toast(`${nameOf(id)} added to turn ${n}`);
+}
+/** The whole card with its stats and ability (a long press on a card of the hand bar). */
+function cardPopup(id) {
+  const c = BYID[id], t = T.turns.find(x => !x.done), n = t ? T.turns.indexOf(t) + 1 : 0;
+  const o = openModal(`<div class="preview"><img src="${full(c)}" alt="${esc(c.name)}" draggable="false">
+    <div class="txt"><b>${esc(c.name)}</b><br>${facName(c.faction)} · ${esc(c.type)} · ${esc(c.rarity)} · ${c.mana} mana${c.str != null ? ` · strength ${c.str}` : ""}${c.spd ? ` · speed ${c.spd}` : ""}${c.units.length ? `<br>${esc(c.units.join(", "))}` : ""}</div>
+    ${c.ability ? `<div class="txt ab">${esc(c.ability)}</div>` : ""}
+    <div class="pc"><button id="pc">Close</button>${t ? `<button class="primary" id="pa">Add to turn ${n}</button>` : ""}</div></div>`);
+  $("#pc", o).onclick = closeModal;
+  if (t) $("#pa", o).onclick = () => { closeModal(); addPlayed(id); };
+}
+let hold = null;
 function drawHandBar() {
   const bar = $("#handbar"); if (!bar) return;
-  const r = H.last;
-  if (!r || !r.decks || !r.decks.length) { bar.innerHTML = ""; bar.hidden = true; return; }
+  const r = H.last, hasHand = r && r.decks && r.decks.length;
+  const g = T.guess !== false ? guessedDecks() : { guesses: [], note: "" };
+  if (!hasHand && !g.guesses.length && !g.note) { bar.innerHTML = ""; bar.hidden = true; return; }
   bar.hidden = false;
-  const seen = new Set(confirmedTurns().flat().map(nameOf));
-  const ranked = Object.entries(r.hand).sort((a, b) => b[1] - a[1]);
-  const hand = r.best_hand ? r.best_hand.cards.slice().sort((a, b) => (r.hand[b] || 0) - (r.hand[a] || 0)) : ranked.slice(0, HC.HAND_SIZE).map(x => x[0]);
-  const others = ranked.filter(([c]) => !hand.includes(c)).slice(0, 6);
-  const nT = confirmedTurns().length;
-  const odds = `<div class="hbs"><div class="dbh">${r.guessed ? `<b>Guessed decks</b> <span class="dim">no known deck holds these cards, after ${nT} turn${nT > 1 ? "s" : ""}</span>`
-      : `<b>Which deck?</b> <span class="dim">${r.decks.length} of ${r.pool} candidates fit, after ${nT} turn${nT > 1 ? "s" : ""}</span>`}</div>` +
-    r.decks.slice(0, 8).map(d => { const m = r.poolMeta[d.name], open = H.openDeck === d.name;
-      return `<div class="drow2 ${open ? "on" : ""}" data-dk="${esc(d.name)}"><div class="nm">${esc(m.title)}<small>${facName(m.faction)} · ${esc(r.guessed ? m.basis : m.archetype)}</small></div>` +
-        (r.guessed ? `<div class="track"></div><div class="v dim">guess</div></div>` : `<div class="track"><i style="width:${d.p * 100}%"></i></div><div class="v">${pct(d.p)}</div></div>`) +
-        (open ? `<div class="mini" style="margin:2px 6px 8px">${d.cards.map(c => `<span class="${seen.has(c) ? "seen" : ""}">${esc(c)}<b>${pct(r.hand[c] || 0)}</b></span>`).join("")}</div>` : ""); }).join("") +
-    (r.decks.length > 8 ? `<p class="hint left">+ ${r.decks.length - 8} less likely decks</p>` : "") + `</div>`;
-  bar.onclick = e => { const d = e.target.closest("[data-dk]"); if (d) { H.openDeck = H.openDeck === d.dataset.dk ? null : d.dataset.dk; drawHandBar(); } };
-  bar.innerHTML = odds + `<div class="hbs"><div class="dbh"><b>Most probable hand now</b>${r.best_hand ? ` <span class="dim">exact hand ${pct(r.best_hand.p, 1)}</span>` : ""}</div>
+  const seen = new Set(confirmedTurns().flat().map(nameOf)), played = new Set(playedCards().map(nameOf));
+  const chip = (c, p, cls) => `<span class="${cls}" data-cid="${cidOf(c)}">${esc(c)}<b>${pct(p)}</b></span>`;
+  let h = "";
+  if (hasHand && !r.guessed) {  // known decks that fit
+    const nT = confirmedTurns().length;
+    h += `<div class="hbs"><div class="dbh"><b>Which deck?</b> <span class="dim">${r.decks.length} of ${r.pool} candidates fit, after ${nT} turn${nT > 1 ? "s" : ""}</span></div>` +
+      r.decks.slice(0, 8).map(d => { const m = r.poolMeta[d.name], open = H.openDeck === d.name;
+        return `<div class="drow2 ${open ? "on" : ""}" data-dk="${esc(d.name)}"><div class="nm">${esc(m.title)}<small>${facName(m.faction)} · ${esc(m.archetype)}</small></div>` +
+          `<div class="track"><i style="width:${d.p * 100}%"></i></div><div class="v">${pct(d.p)}</div></div>` +
+          (open ? `<div class="mini" style="margin:2px 6px 8px">${d.cards.map(c => chip(c, r.hand[c] || 0, seen.has(c) ? "seen" : "")).join("")}</div>` : ""); }).join("") +
+      (r.decks.length > 8 ? `<p class="hint left">+ ${r.decks.length - 8} less likely decks</p>` : "") + `</div>`;
+  }
+  if (T.guess !== false && (g.guesses.length || g.note)) {  // guessed decks: only this section follows the toggle
+    h += `<div class="hbs"><div class="dbh"><b>Guessed decks</b> <span class="dim">from the ${played.size} card${played.size === 1 ? "" : "s"} seen, your decks and ${state.fragments.length} fragment${state.fragments.length === 1 ? "" : "s"}; % = chance the card is in the deck. Tap a card to add it to the turn, hold for details</span></div>` +
+      (g.guesses.length ? g.guesses.map((d, i) => { const open = (H.openGuess ?? 0) === i;
+        return `<div class="drow2 grow ${open ? "on" : ""}" data-gk="${i}"><div class="nm">${esc(d.title)}<small>${facName(d.faction)} · ${esc(d.basis)}</small></div></div>` +
+          (open ? `<div class="mini gchips">${d.list.map(x => chip(x.name, x.p, played.has(x.name) ? "seen" : "")).join("")}</div>` : ""); }).join("")
+        : `<p class="hint left">No deck guessed: ${esc(g.note)}.</p>`) + `</div>`;
+  }
+  if (hasHand) {
+    const ranked = Object.entries(r.hand).sort((a, b) => b[1] - a[1]);
+    const hand = r.best_hand ? r.best_hand.cards.slice().sort((a, b) => (r.hand[b] || 0) - (r.hand[a] || 0)) : ranked.slice(0, HC.HAND_SIZE).map(x => x[0]);
+    const others = ranked.filter(([c]) => !hand.includes(c)).slice(0, 6);
+    h += `<div class="hbs"><div class="dbh"><b>Most probable hand now</b>${r.best_hand ? ` <span class="dim">exact hand ${pct(r.best_hand.p, 1)}</span>` : ""}${r.guessed ? ` <span class="dim">(from guessed decks)</span>` : ""}</div>
       <div class="hbrow">${hand.map(c => probCard(c, r.hand[c] || 0, seen.has(c))).join("")}</div></div>
     <div class="hbs"><div class="dbh"><b>Other cards it could hold</b></div>
       <div class="hbrow">${others.map(([c, p]) => probCard(c, p, seen.has(c))).join("")}</div></div>`;
+  }
+  bar.innerHTML = h;
+  bar.onclick = e => {
+    if (hold && hold.fired) { hold = null; return; }  // the long press already opened the card
+    const card = e.target.closest("[data-cid]"), d = e.target.closest("[data-dk]"), gk = e.target.closest("[data-gk]");
+    if (card) addPlayed(card.dataset.cid);
+    else if (d) { H.openDeck = H.openDeck === d.dataset.dk ? null : d.dataset.dk; drawHandBar(); }
+    else if (gk) { const i = +gk.dataset.gk; H.openGuess = (H.openGuess ?? 0) === i ? -1 : i; drawHandBar(); }
+  };
+  bar.onpointerdown = e => {
+    const el = e.target.closest("[data-cid]"); if (!el) return;
+    clearTimeout(hold && hold.t); hold = { fired: false };
+    hold.t = setTimeout(() => { hold.fired = true; cardPopup(el.dataset.cid); }, 450);
+  };
+  const end = () => hold && clearTimeout(hold.t);
+  bar.onpointerup = end; bar.onpointercancel = end; bar.onpointermove = e => { if (hold && !hold.fired && Math.abs(e.movementX) + Math.abs(e.movementY) > 6) end(); };
+  bar.oncontextmenu = e => { if (e.target.closest("[data-cid]")) e.preventDefault(); };
 }
 function drawResult() {
   drawHandBar();

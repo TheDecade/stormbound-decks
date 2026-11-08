@@ -538,6 +538,7 @@ function renderView(id) {
   load();
   CARDS = await (await fetch("cards.json")).json();
   CARDS.forEach(c => { BYID[c.id] = c; c._s = norm([c.name, c.ability, c.units.join(" "), c.type, c.rarity].join(" ")); });
+  if (document.readyState !== "complete") await new Promise(r => addEventListener("load", r));  // tools.js and the other scripts load after this one: route only when all are there
   route();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 })();

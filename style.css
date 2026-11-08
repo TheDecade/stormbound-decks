@@ -237,3 +237,11 @@ details>summary{padding:8px 0;font-weight:600;color:var(--muted)}
 .fxq > span{flex:1;min-width:180px}
 .fxq.done{border-left-color:var(--ok);color:var(--muted)}
 .fxq button{padding:6px 12px;font-size:14px}
+
+/* tap = add to the turn, hold = full card: no browser callouts or text selection on these */
+[data-cid]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;cursor:pointer;touch-action:pan-x pan-y}
+[data-cid] img{-webkit-touch-callout:none;pointer-events:none}
+.mini [data-cid]:active,.pcard[data-cid]:active{opacity:.6}
+.gchips{margin:2px 6px 10px}
+.drow2.grow{grid-template-columns:1fr}
+.preview .txt.ab{color:var(--text,#e8ebff);font-size:15px}

@@ -55,6 +55,19 @@ const FR = (() => {
       out.sort((x, y) => (y[by] - x[by]) || (y.n - x.n) || (x.card < y.card ? -1 : x.card > y.card ? 1 : 0));
       return out.slice(0, top);
     }
+    /** Chance that `card` is in the deck of an opponent seen with `seen`: the share of the rows that hold it, each row weighted by how many of
+        the seen cards it shares (squared), pulled towards the card's base rate. */
+    inclusion(seen, card) {
+      let sw = 0, sc = 0;
+      for (const r of this.rows) {
+        const shared = seen.filter(c => r.cards.includes(c)).length;
+        if (!shared) continue;
+        const w = (shared / seen.length) ** 2;
+        sw += w;
+        if (r.cards.includes(card)) sc += w;
+      }
+      return (sc + ALPHA * this.p(card)) / (sw + ALPHA);
+    }
     /** Naive-Bayes log score of `card` being in a deck that holds `seen`: popularity times the lifts. */
     score(seen, card) {
       let s = Math.log(this.p(card));
@@ -86,7 +99,7 @@ const FR = (() => {
   /** Guess the decks an opponent can have when no known deck holds all the cards seen.
       seenIn: card names; cards: the card list ({name, faction, rarity}); rows: the corpus; labels: faction key -> display name.
       Returns {guesses: [{name, title, faction, archetype: "Guess", cards, basis}], note} (note: why there is none). */
-  function guessDecks(seenIn, cards, rows, { k = 4, labels = {} } = {}) {
+  function guessDecks(seenIn, cards, rows, { k = 4, labels = {}, faction = null } = {}) {
     const byName = Object.fromEntries(cards.map(c => [c.name, c]));
     const seen = [...new Set(seenIn)];
     if (!seen.length) return { guesses: [], note: "no card seen" };
@@ -95,7 +108,7 @@ const FR = (() => {
     if (unknown.length) return { guesses: [], note: "unknown card " + unknown[0] };
     const found = [...new Set(seen.map(c => byName[c].faction).filter(f => f !== "neutral"))].sort();
     if (found.length > 1) return { guesses: [], note: "cards of more than one faction: " + found.map(f => labels[f] || f).join(", ") };
-    const derived = found[0] || null;
+    const derived = found[0] || faction || null;  // the faction of the cards seen, else the one given (public at the start of a game)
     const corpus = new Corpus(rows);
     let facs = derived ? [derived] : FACTION_KEYS.slice();
     if (!derived) {  // only neutral cards: the faction is open, keep the two the data likes most
@@ -134,6 +147,6 @@ const FR = (() => {
     return { guesses: out, note: "" };
   }
 
-  return { Corpus, cardInfo, guessDecks, FACTION_KEYS, MAX_CARDS };
+  return { Corpus, cardInfo, guessDecks, fill, FACTION_KEYS, MAX_CARDS };
 })();
 if (typeof module !== "undefined") module.exports = FR;
