@@ -6,7 +6,7 @@ const DECK_SIZE = 12;
 const KEY = "sb-decks-v1";
 
 let CARDS = [], BYID = {};
-let state = { decks: [], fragments: [] };  // fragments: incomplete lists of cards seen in a game, kept as statistics (not decks)
+let state = { decks: [], fragments: [], games: [], current: "" };  // fragments: incomplete lists of cards seen in a game, kept as statistics (not decks); games: results of games that have no fragment; current: id of the deck I play now; a deck with mine:true is one I play (not one I met)
 let ui = { search: "", kind: "all", tab: "cards" };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -18,7 +18,11 @@ const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(
 function load() {
   try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.decks)) state = s; } catch (e) {}
   if (!Array.isArray(state.fragments)) state.fragments = [];
+  if (!Array.isArray(state.games)) state.games = [];
+  if (typeof state.current !== "string") state.current = "";
 }
+/** The deck I play now (one of my decks), or undefined. */
+const currentDeck = () => state.decks.find(d => d.mine && d.saved !== false && d.id === state.current);
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { toast("Could not save (storage full or blocked)"); }
 }
@@ -30,6 +34,7 @@ function toast(msg) {
 /* ---------- routing ---------- */
 function route() {
   if (location.hash === "#/tools") return renderTools();
+  if (location.hash === "#/types") return renderTypes();
   const m = location.hash.match(/^#\/deck\/([^/]+)(\/edit)?$/);
   const d = m && state.decks.find(x => x.id === m[1]);
   if (d) { if (m[2] || d.saved === false) renderEditor(d.id); else renderView(d.id); } else renderList();
@@ -45,6 +50,7 @@ $("#overlay").addEventListener("pointerdown", e => { if (e.target.id === "overla
 function groupDecks() {
   const t = {};
   for (const d of state.decks) {
+    if (d.mine) continue;  // my own decks have their own section
     const a = (t[d.faction] ??= {}), b = (a[d.archetype || "—"] ??= {}), c = (b[d.type || "—"] ??= []);
     c.push(d);
   }
@@ -54,7 +60,13 @@ const openKeys = new Set(JSON.parse(sessionStorage.getItem("sb-open") || "[]"));
 function renderList() {
   const g = groupDecks();
   let h = `<div class="bar"><h1>Stormbound Decks</h1><button id="tools">⚔ Battle tools</button></div><div class="scroll">`;
-  if (!state.decks.length) h += `<div class="empty">No decks yet.<br>Tap <b>+ New deck</b> to start.</div>`;
+  const mine = state.decks.filter(d => d.mine).sort((x, y) => y.updated - x.updated), cur = currentDeck();
+  h += `<div class="mydecks"><h3>My decks <span class="dim">the decks I play; the one marked ● is used for Won / Lost</span></h3>` +
+    (mine.map(d => `<div class="deckrow mine f-${d.faction}" data-id="${d.id}"><button class="use ${cur && cur.id === d.id ? "on" : ""}" data-use="${d.id}" aria-label="Play with this deck">${cur && cur.id === d.id ? "●" : "○"}</button>
+      <span class="nm">${d.saved === false ? "Unsaved draft" : esc(d.name || "Untitled")}<small>${FACTIONS[d.faction]}${d.archetype ? " · " + esc(d.archetype) : ""}</small></span>
+      <span class="meta ${d.cards.length === DECK_SIZE ? "full" : ""}">${d.cards.length}/${DECK_SIZE}</span></div>`).join("") || `<div class="hint left">No deck of mine yet.</div>`) +
+    `<button id="newmine">+ My deck</button></div>`;
+  if (!state.decks.some(d => !d.mine)) h += `<div class="empty">No decks yet.<br>Tap <b>+ New deck</b> to start.</div>`;
   for (const f of Object.keys(FACTIONS)) {
     if (!g[f]) continue;
     const n = Object.values(g[f]).flatMap(a => Object.values(a)).flat().length;
@@ -76,10 +88,12 @@ function renderList() {
     h += `</details>`;
   }
   const nSaved = state.decks.filter(d => d.saved !== false).length, nFrag = state.fragments.length;
-  h += `<div class="footer-tools"><button id="expc">Export for PC (${nSaved} deck${nSaved === 1 ? "" : "s"}, ${nFrag} fragment${nFrag === 1 ? "" : "s"})</button><button id="gh">Push to GitHub</button><button id="frags">Fragments (${nFrag})</button><button id="exp">Export backup</button><button id="imp">Import deck / backup</button></div></div>
+  h += `<div class="footer-tools"><button id="expc">Export for PC (${nSaved} deck${nSaved === 1 ? "" : "s"}, ${nFrag} fragment${nFrag === 1 ? "" : "s"})</button><button id="gh">Push to GitHub</button><button id="frags">Fragments (${nFrag})</button><button id="types">Deck types met</button><button id="exp">Export backup</button><button id="imp">Import deck / backup</button></div></div>
     <button class="primary fab" id="new">+ New deck</button>`;
   $("#app").innerHTML = h;
-  $("#new").onclick = pickFaction;
+  $("#new").onclick = () => pickFaction(false);
+  $("#newmine").onclick = () => pickFaction(true);
+  $("#types").onclick = () => { location.hash = "#/types"; };
   $("#tools").onclick = () => { location.hash = "#/tools"; };
   $("#exp").onclick = exportBackup;
   $("#expc").onclick = () => exportForPc(state.decks.filter(d => d.saved !== false), state.fragments);
@@ -90,7 +104,11 @@ function renderList() {
     el.open ? openKeys.add(el.dataset.k) : openKeys.delete(el.dataset.k);
     sessionStorage.setItem("sb-open", JSON.stringify([...openKeys]));
   }));
-  $("#app").onclick = e => { const r = e.target.closest(".deckrow"); if (r) location.hash = "#/deck/" + r.dataset.id; };  // a saved deck opens its view, a draft the editor (see route)
+  $("#app").onclick = e => {
+    const u = e.target.closest("[data-use]");
+    if (u) { state.current = state.current === u.dataset.use ? "" : u.dataset.use; save(); return renderList(); }
+    const r = e.target.closest(".deckrow"); if (r) location.hash = "#/deck/" + r.dataset.id;
+  };  // a saved deck opens its view, a draft the editor (see route)
 }
 
 /* ---------- export for the PC: deck files in the convention of the Stormbound project's data/decks ---------- */
@@ -99,12 +117,13 @@ const slug = s => norm(s).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 function deckToFile(d) {
   const cards = d.cards.map(i => BYID[i].name);
   return { name: slug(d.name) || "deck", nickname: d.name, faction: FOLDER[d.faction], archetype: slug(d.archetype || ""), type: d.type || "",
-    v1: cards, card_pool: cards.slice(), source: { site: "ipad deck app", title: d.name, date: new Date().toISOString().slice(0, 10) } };
+    ...(d.mine ? { mine: true } : {}), v1: cards, card_pool: cards.slice(), source: { site: "ipad deck app", title: d.name, date: new Date().toISOString().slice(0, 10) } };
 }
 /** A fragment as the PC imports it (scripts/import_ipad_decks.py): card names, the faction folder name, the id of the game. */
 function fragToFile(f) {
   return { id: f.id, game: f.game, cards: f.cards.filter(i => BYID[i]).map(i => BYID[i].name), faction: FOLDER[f.faction],
-    turns_seen: f.turns || null, date: f.date, source: "ipad" };
+    turns_seen: f.turns || null, date: f.date, source: "ipad",
+    ...(f.result ? { result: f.result } : {}), ...(f.my_deck ? { my_deck: f.my_deck, my_cards: (f.my_cards || []).filter(i => BYID[i]).map(i => BYID[i].name) } : {}) };
 }
 async function exportForPc(decks, frags = []) {
   if (!decks.length && !frags.length) return toast("No saved decks or fragments to export");
@@ -157,7 +176,7 @@ async function pushToGithub(cfg, log) {
     for (const fr of state.fragments.map(fragToFile)) {
       const had = by.get(key(fr));
       if (!had) { by.set(key(fr), fr); r.newFrag++; }
-      else if (listKey(had.cards) === listKey(fr.cards)) r.sameFrag++;
+      else if (listKey(had.cards) === listKey(fr.cards) && (had.result || "") === (fr.result || "") && (had.my_deck || "") === (fr.my_deck || "")) r.sameFrag++;
       else { by.set(key(fr), fr); r.upFrag++; }  // the same game, seen further
     }
     if (r.newFrag || r.upFrag) await ghWrite(cfg, "fragments.json", { format: "stormbound-ipad-decks", fragments: [...by.values()] }, old && old.sha, `Fragments: +${r.newFrag} new, ${r.upFrag} updated`);
@@ -227,9 +246,13 @@ function importBackup() {
           for (const fr of Array.isArray(s.fragments) ? s.fragments : []) {  // ids (a backup) or card names (an export for the PC)
             const cards = (fr.cards || []).map(x => BYID[x] ? x : byName[norm(x)]).filter(Boolean), fac = FACTION_KEYS[norm(String(fr.faction || "")).replace(/ /g, "_")];
             if (!fr.id || haveF.has(fr.id) || !cards.length || !fac) continue;
-            state.fragments.push({ id: fr.id, game: fr.game || "", cards, faction: fac, turns: fr.turns || fr.turns_seen || null, date: fr.date || new Date().toISOString().slice(0, 10), updated: fr.updated || Date.now() });
+            const mineCards = (fr.my_cards || []).map(x => BYID[x] ? x : byName[norm(x)]).filter(Boolean);
+            state.fragments.push({ id: fr.id, game: fr.game || "", cards, faction: fac, turns: fr.turns || fr.turns_seen || null, date: fr.date || new Date().toISOString().slice(0, 10), updated: fr.updated || Date.now(),
+              ...(fr.result === "win" || fr.result === "loss" ? { result: fr.result } : {}), ...(fr.my_deck ? { my_deck: fr.my_deck, my_cards: mineCards } : {}) });
             nf++;
           }
+          const haveG = new Set(state.games.map(x => x.game));
+          for (const g of Array.isArray(s.games) ? s.games : []) if (g.game && !haveG.has(g.game)) state.games.push(g);
         } else {  // a deck file
           const d = deckFromFile(s); if (!d) throw 0;
           const key = x => x.faction + "|" + norm(x.name) + "|" + [...x.cards].sort().join();
@@ -250,7 +273,7 @@ function fragmentsDialog() {
     const rows = state.fragments.slice().sort((a, b) => (b.updated || 0) - (a.updated || 0));
     const o = openModal(`<div class="modal"><h2>Fragments (${rows.length})</h2>
       <p class="hint left">Incomplete lists of the cards an opponent played, kept as statistics only. They go to the PC with <b>Export for PC</b>.</p>
-      ${rows.map(f => `<div class="frrow f-${f.faction}"><div><b>${FACTIONS[f.faction] || ""}</b> · ${f.cards.length} card${f.cards.length === 1 ? "" : "s"} · ${esc(f.date || "")}
+      ${rows.map(f => `<div class="frrow f-${f.faction}"><div><b>${FACTIONS[f.faction] || ""}</b> · ${f.cards.length} card${f.cards.length === 1 ? "" : "s"} · ${esc(f.date || "")}${f.result ? ` · <b>${f.result === "win" ? "Won" : "Lost"}</b>` : ""}${f.my_deck ? ` with ${esc(f.my_deck)}` : ""}
         <div class="dim">${esc(f.cards.filter(i => BYID[i]).map(i => BYID[i].name).join(", "))}</div></div>
         <button class="danger" data-del="${f.id}" aria-label="delete">✕</button></div>`).join("") || `<div class="hint">No fragment yet. In Battle tools, add the cards an opponent played, then <b>Create deck from played cards</b> → <b>Create fragment</b>.</div>`}
       <div class="actions"><button id="stats">Statistics</button><button id="cancel">Close</button></div></div>`);
@@ -330,13 +353,13 @@ function combo(host, { value, options, placeholder, onChange }) {
 const uniq = a => [...new Set(a.filter(x => x && x !== "—"))].sort((x, y) => x.localeCompare(y));
 
 /* ---------- new deck: faction only ---------- */
-function pickFaction() {
-  const o = openModal(`<div class="modal"><h2>New deck – choose faction</h2><div class="factions">
+function pickFaction(mine = false) {
+  const o = openModal(`<div class="modal"><h2>${mine ? "New deck of mine" : "New deck"} – choose faction</h2><div class="factions">
     ${Object.entries(FACTIONS).map(([k, n]) => `<button type="button" class="f-${k}" data-f="${k}">${n}</button>`).join("")}</div>
     <div class="actions"><button id="cancel">Cancel</button></div></div>`);
   $("#cancel").onclick = closeModal;
   o.querySelectorAll("[data-f]").forEach(b => b.onclick = () => {
-    const d = { id: uid(), name: "", faction: b.dataset.f, archetype: "", type: "", cards: [], saved: false, updated: Date.now() };
+    const d = { id: uid(), name: "", faction: b.dataset.f, archetype: "", type: "", cards: [], saved: false, updated: Date.now(), ...(mine ? { mine: true } : {}) };
     state.decks.push(d); save(); closeModal(); location.hash = "#/deck/" + d.id;
   });
 }
@@ -352,6 +375,7 @@ function deckDialog(deck) {
     <div class="field"><label>Nickname</label><input id="dn" autocomplete="off" placeholder="e.g. Goat spam" value="${esc(v.name)}"></div>
     <div class="field"><label>Archetype</label><div id="ca"></div></div>
     <div class="field"><label>Type</label><div id="ct"></div></div>
+    <label class="hint left chk"><input type="checkbox" id="dmine"> A deck I play (listed under My decks, used for Won / Lost)</label>
     <div class="actions"><button class="danger" id="del" style="margin-right:auto">Delete</button>
       ${draft ? "" : `<button id="expone">Export for PC</button>`}
       <button id="cancel">Cancel</button><button class="primary" id="ok">Save</button></div></div>`);
@@ -364,10 +388,11 @@ function deckDialog(deck) {
     options: () => { const same = uniq(others("archetype", d => d.faction === v.faction)); return same.concat(uniq(others("archetype", () => true)).filter(a => !same.includes(a))); } });
   combo($("#ct"), { value: v.type, placeholder: "Pick or create type…", onChange: x => v.type = x,
     options: () => { const same = uniq(others("type", d => d.faction === v.faction && (d.archetype || "") === (v.archetype || ""))); return same.concat(uniq(others("type", () => true)).filter(a => !same.includes(a))); } });
+  $("#dmine").checked = !!deck.mine;
   $("#cancel").onclick = closeModal;
   if (!draft) $("#expone").onclick = () => exportForPc([deck]);
   $("#del").onclick = () => {
-    if (confirm(`Delete “${deck.name || "Untitled"}”?`)) { state.decks = state.decks.filter(d => d !== deck); save(); closeModal(); location.hash = "#/"; renderList(); }
+    if (confirm(`Delete “${deck.name || "Untitled"}”?`)) { state.decks = state.decks.filter(d => d !== deck); if (state.current === deck.id) state.current = ""; save(); closeModal(); location.hash = "#/"; renderList(); }
   };
   $("#ok").onclick = () => {
     v.name = $("#dn").value.trim();
@@ -379,6 +404,7 @@ function deckDialog(deck) {
     } else {
       deck.cards = deck.cards.filter(c => BYID[c].faction === "neutral" || BYID[c].faction === v.faction);
       Object.assign(deck, { name: v.name, faction: v.faction, archetype: v.archetype.trim(), type: v.type.trim() });
+      if ($("#dmine").checked) deck.mine = true; else { delete deck.mine; if (state.current === deck.id) state.current = ""; }
       deck.saved = true; deck.updated = Date.now(); save(); closeModal(); if (draft) { toast("Deck saved"); location.hash = "#/deck/" + deck.id; } else route();
     }
   };
@@ -517,7 +543,7 @@ function renderView(id) {
     <div class="bar f-${deck.faction}"><button class="ghost" id="back">‹ Decks</button><h1>${esc(deck.name || "Untitled")}</h1>
       <button id="vdet">Details</button><button class="primary" id="vedit">Edit cards</button></div>
     <div class="scroll vview">
-      <div class="badges f-${deck.faction}"><span class="fbadge">${FACTIONS[deck.faction]}</span>${deck.archetype ? `<span class="badge">${esc(deck.archetype)}</span>` : ""}${deck.type ? `<span class="badge">${esc(deck.type)}</span>` : ""}
+      <div class="badges f-${deck.faction}"><span class="fbadge">${FACTIONS[deck.faction]}</span>${deck.mine ? `<span class="badge ok">My deck</span>` : ""}${deck.archetype ? `<span class="badge">${esc(deck.archetype)}</span>` : ""}${deck.type ? `<span class="badge">${esc(deck.type)}</span>` : ""}
         <span class="badge ${n === DECK_SIZE ? "ok" : ""}">${n}/${DECK_SIZE} cards</span></div>
       ${n ? `<div class="vgrid">${cs.map(c => `<div class="pcard" data-id="${c.id}"><div class="pimg"><img width="256" height="256" src="${thumb(c)}" alt=""><span class="cm">${c.mana}</span>${c.str != null ? `<span class="cs">${c.str}</span>` : ""}${c.spd ? `<span class="cv">${c.spd}</span>` : ""}<span class="cn">${esc(c.name)}<small>${esc(c.units.length ? c.units.join(", ") : c.type)}</small></span></div></div>`).join("")}</div>`
         : `<div class="empty">No cards yet.<br>Tap <b>Edit cards</b> to add some.</div>`}

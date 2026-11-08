@@ -245,3 +245,43 @@ details>summary{padding:8px 0;font-weight:600;color:var(--muted)}
 .gchips{margin:2px 6px 10px}
 .drow2.grow{grid-template-columns:1fr}
 .preview .txt.ab{color:var(--text,#e8ebff);font-size:15px}
+
+/* My decks, the result dialog, deck types met */
+.mydecks{padding:10px 14px 4px}
+.mydecks h3{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:6px 0 8px}
+.mydecks h3 .dim{text-transform:none;letter-spacing:0;font-weight:400}
+.mydecks .deckrow{padding:10px 8px;gap:8px}
+.mydecks .deckrow .nm small{display:block;color:var(--muted);font-weight:400;font-size:12px}
+.mydecks .use{font-size:20px;width:34px;padding:2px 0;flex:none;text-align:center;background:none;color:var(--muted)}
+.mydecks .use.on{color:var(--accent)}
+#newmine{margin:8px 0 6px;font-size:14px;color:var(--muted)}
+#hmy{width:100%;font-size:15px;padding:10px 12px;border-radius:10px;background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+.actions.res{justify-content:stretch}
+.actions.res button{flex:1;padding:16px;font-size:18px;font-weight:700}
+#tybody{padding:10px 14px 30px}
+#tybody h3{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:18px 0 8px}
+#tybody h3 .dim{text-transform:none;letter-spacing:0;font-weight:400}
+.rrow{display:grid;grid-template-columns:minmax(90px,34%) 1fr 74px;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line)}
+.rrow.dim{opacity:.6}
+.rn small,.rv small{display:block;color:var(--muted);font-size:12px}
+.rv{text-align:right;font-weight:700}
+.rng{position:relative;height:12px;border-radius:6px;background:var(--panel2)}
+.rng i{position:absolute;top:0;bottom:0;border-radius:6px;background:rgba(90,160,232,.55)}
+.rng b{position:absolute;top:-2px;bottom:-2px;width:3px;margin-left:-1px;border-radius:2px;background:var(--accent)}
+details.few{margin-top:10px;color:var(--muted);font-size:14px}
+details.few summary{cursor:pointer;padding:6px 0}
+.grow2{border-top:1px solid var(--line);padding:8px 0}
+.grow2 summary{display:flex;gap:10px;align-items:center;cursor:pointer;list-style:none}
+.grow2 summary::-webkit-details-marker{display:none}
+.grow2 .gv{flex:1;min-width:0}
+.grow2 .gv small{display:block;color:var(--muted);font-size:12px}
+.grow2 .gf{font-size:13px;font-weight:700;min-width:62px}
+.grow2 .gd{font-size:12px}
+.rbadge{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:var(--panel2);font-weight:800;font-size:13px;flex:none}
+.rbadge.win{background:#175f43;color:#fff}
+.rbadge.loss{background:#7d2433;color:#fff}
+#tybody .chips{padding:0 0 10px}
+.tabs.always{display:flex;gap:6px}
+.tabs.always button.on{background:var(--accent);color:#221a00;font-weight:700}
+#tybody h3 .dn{text-transform:none;letter-spacing:0;font-size:16px;color:var(--text)}
+.bar .ghost{white-space:nowrap}

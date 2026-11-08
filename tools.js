@@ -32,7 +32,7 @@ async function loadBundled() {
 function candidatePool() {
   const out = {};
   for (const [k, d] of Object.entries(BUNDLED || {})) if (!T.faction || d.faction === T.faction) out[k] = d;  // the opponent faction is public: only its decks
-  for (const d of state.decks) if (d.saved !== false && d.cards.length === DECK_SIZE && (!T.faction || d.faction === T.faction))
+  for (const d of state.decks) if (!d.mine && d.saved !== false && d.cards.length === DECK_SIZE && (!T.faction || d.faction === T.faction))
     out["u:" + d.id] = { title: "★ " + (d.name || "Untitled"), faction: d.faction, archetype: d.archetype || "—", cards: d.cards.map(i => BYID[i].name) };
   return out;
 }
@@ -43,7 +43,7 @@ function corpusRows(pool) {
   for (const [name, d] of Object.entries(pool)) rows.push({ cards: d.cards, faction: d.faction, id: name, title: d.title, kind: "deck" });
   return rows;
 }
-const poolInfo = () => { const mine = state.decks.filter(d => d.saved !== false);
+const poolInfo = () => { const mine = state.decks.filter(d => d.saved !== false && !d.mine);
   const ok = mine.filter(d => d.cards.length === DECK_SIZE).length, bundled = Object.keys(BUNDLED || {}).length;
   return `Candidates: ${bundled} project decks + ${ok} of your ${mine.length} saved deck${mine.length === 1 ? "" : "s"}` +
     (mine.length > ok ? ` (${mine.length - ok} skipped: fewer than ${DECK_SIZE} cards, they would skew the odds)` : "") + ".";
@@ -79,7 +79,10 @@ function drawDeckBar() {
 function drawInput() {
   drawDeckBar(); drawHandBar();
   const box = $("#tin"); if (!box) return;
-    let h = `<div class="field"><label>Opponent faction (public at the start of a game)</label><div class="factions">${Object.entries(FACTIONS).map(([k, n]) => `<button type="button" class="f-${k} ${T.faction === k ? "sel" : ""}" data-fac="${k}">${n}</button>`).join("")}</div></div><p class="hint left">Add the cards the opponent played each turn, then tap <b>Done</b>. Cards seen played are in its deck for sure.</p><div id="turns">`;
+    const myDecks = state.decks.filter(d => d.mine && d.saved !== false), cur = currentDeck();
+  let h = (myDecks.length ? `<div class="field"><label>I play with</label><select id="hmy"><option value="">– no deck chosen –</option>${myDecks.map(d => `<option value="${d.id}" ${cur && cur.id === d.id ? "selected" : ""}>${esc(d.name || "Untitled")} (${FACTIONS[d.faction]})</option>`).join("")}</select></div>`
+      : `<p class="hint left">Add your own decks on the first page (<b>My decks</b>) to record Won / Lost against the deck you play.</p>`) +
+    `<div class="field"><label>Opponent faction (public at the start of a game)</label><div class="factions">${Object.entries(FACTIONS).map(([k, n]) => `<button type="button" class="f-${k} ${T.faction === k ? "sel" : ""}" data-fac="${k}">${n}</button>`).join("")}</div></div><p class="hint left">Add the cards the opponent played each turn, then tap <b>Done</b>. Cards seen played are in its deck for sure.</p><div id="turns">`;
   T.turns.forEach((t, i) => {
     h += `<div class="turn ${t.done ? "done" : ""}"><div class="thead"><b>Turn ${i + 1}</b><div class="tchips">` +
       (t.cards.map((id, k) => `<span class="pick f-${BYID[id].faction}"><span class="m">${BYID[id].mana}</span>${esc(nameOf(id))}${fxAnswer(t, id) === "yes" ? " ↩" : ""}${t.done ? "" : `<button data-rm="${i}:${k}" aria-label="remove">✕</button>`}</span>`).join("") ||
@@ -97,6 +100,7 @@ function drawInput() {
     <p class="hint left">${esc(poolInfo())} Fragments saved: ${state.fragments.length}. An opponent with another deck is guessed from them.</p>
     <label class="hint left chk"><input type="checkbox" id="hguess"> Show the guessed decks</label>`;
   box.innerHTML = h;
+  if ($("#hmy")) $("#hmy").onchange = e => { state.current = e.target.value; save(); };
   $("#hguess").checked = T.guess !== false;
   $("#hguess").onchange = e => { T.guess = e.target.checked; hsave(); drawHandBar(); };
   $("#hcycle").value = T.cycle;
@@ -124,9 +128,47 @@ function drawInput() {
     const done = T.turns.filter(t => t.done); if (!done.length) return;
     T.turns = T.turns.slice(0, done.length - 1); T.turns.push({ cards: [], done: false }); hsave(); drawInput(); recalc();
   };
-  $("#hnew").onclick = () => { if (playedCards().length && !confirm("Start a new game? The cards entered are cleared.")) return;
-    T.turns = [{ cards: [], done: false }]; T.game = uid(); T.faction = ""; H.openDeck = null; hsave(); drawInput(); recalc(); };
+  $("#hnew").onclick = () => { if (!playedCards().length) return resetGame(); resultDialog(); };
   $("#hmake").onclick = makeDeckDialog;
+}
+function resetGame() {
+  T.turns = [{ cards: [], done: false }]; T.game = uid(); T.faction = ""; H.openDeck = null; hsave(); drawInput(); recalc();
+}
+/** The faction of the game: the cards seen decide, else the one picked; "" when open or when the cards mix factions. */
+function gameFaction() {
+  const fs = [...new Set(playedCards().map(i => BYID[i].faction).filter(f => f !== "neutral"))];
+  return fs.length > 1 ? "" : fs[0] || T.faction || "";
+}
+/** Save how the game ended (win | loss) with the deck I played: on the game's fragment when it has one (or can have one), else as a game record. */
+function recordGame(result) {
+  const my = currentDeck(), ids = playedCards().slice(0, DECK_SIZE), fac = gameFaction(), day = new Date().toISOString().slice(0, 10);
+  const mine = my ? { my_deck: my.name || "Untitled", my_cards: my.cards.slice() } : {};
+  const at = state.fragments.findIndex(f => f.game === T.game);
+  if (ids.length && fac) {  // the cards seen are kept as a fragment, as Create fragment would
+    const had = at >= 0 ? state.fragments[at] : null, lastWithCards = T.turns.reduce((m, t, i) => t.cards.length ? i + 1 : m, 0);
+    const rec = { ...(had || {}), id: had ? had.id : uid(), game: T.game, cards: ids, faction: fac, date: had ? had.date : day,
+      turns: Math.max(T.turns.filter(t => t.done).length, lastWithCards), updated: Date.now(), result, ...mine };
+    if (!my) { delete rec.my_deck; delete rec.my_cards; }
+    if (at >= 0) state.fragments[at] = rec; else state.fragments.push(rec);
+    state.games = state.games.filter(g => g.game !== T.game);
+  } else {
+    const rec = { game: T.game, cards: ids, faction: fac, date: day, result, updated: Date.now(), ...mine };
+    const k = state.games.findIndex(g => g.game === T.game);
+    if (k >= 0) state.games[k] = rec; else state.games.push(rec);
+  }
+  save();
+}
+function resultDialog() {
+  const my = currentDeck(), n = playedCards().length;
+  const o = openModal(`<div class="modal"><h2>How did the game end?</h2>
+    <p class="hint left">${my ? `You played <b>${esc(my.name || "Untitled")}</b>.` : `No deck of yours is chosen: the result is saved without a deck.`} ${n} card${n === 1 ? "" : "s"} seen from the opponent${gameFaction() ? ` (${FACTIONS[gameFaction()]})` : ", faction not known"}.</p>
+    <div class="actions res"><button class="primary" id="rwin">Won</button><button class="danger" id="rloss">Lost</button></div>
+    <div class="actions"><button id="rcancel">Back to the game</button><button id="rskip">Skip: don't save a result</button></div></div>`);
+  $("#rcancel").onclick = closeModal;
+  $("#rskip").onclick = () => { closeModal(); resetGame(); };
+  for (const [id, r, word] of [["rwin", "win", "Won"], ["rloss", "loss", "Lost"]]) $("#" + id).onclick = () => {
+    recordGame(r); closeModal(); resetGame(); toast(`${word} saved${my ? " with " + (my.name || "Untitled") : ""}`);
+  };
 }
 function drawSugg(q) {
   const t = T.turns.find(x => !x.done), toks = norm(q.value).split(/\s+/).filter(Boolean), sg = $("#sugg");
@@ -303,7 +345,7 @@ function makeDeckDialog() {
     <div class="field"><label>Archetype</label><div id="ca"></div></div>
     <div class="field"><label>Type</label><div id="ct"></div></div>
     <p class="hint left"><b>Create fragment</b> keeps these cards as statistics only (not a deck) and needs just the faction: no nickname, archetype or type. Tap it again in the same game to update the fragment.</p>
-    <div class="actions"><button id="cancel">Cancel</button><button id="frag">Create fragment</button><button class="primary" id="ok">Save to my decks</button></div></div>`);
+    <div class="actions"><button id="cancel">Cancel</button><button id="frag">Create fragment</button><button class="primary" id="ok">Save deck</button></div></div>`);
   o.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { v.faction = b.dataset.f; o.querySelectorAll("[data-f]").forEach(x => x.classList.toggle("sel", x === b)); });
   const opts = key => () => { const same = uniq(state.decks.filter(d => d.faction === v.faction).map(d => d[key])); return same.concat(uniq(state.decks.map(d => d[key])).filter(a => !same.includes(a))); };
   combo($("#ca"), { value: "", placeholder: "Pick or create archetype…", onChange: x => v.archetype = x, options: opts("archetype") });
@@ -317,7 +359,7 @@ function makeDeckDialog() {
     const rec = { id: uid(), game: T.game, cards: ids.slice(0, DECK_SIZE), faction: v.faction, date: new Date().toISOString().slice(0, 10),
       turns: Math.max(T.turns.filter(t => t.done).length, lastWithCards), updated: Date.now() };
     const at = state.fragments.findIndex(f => f.game === T.game);
-    if (at >= 0) { rec.id = state.fragments[at].id; rec.date = state.fragments[at].date; state.fragments[at] = rec; } else state.fragments.push(rec);
+    if (at >= 0) { const had = state.fragments[at]; state.fragments[at] = { ...had, ...rec, id: had.id, date: had.date }; } else state.fragments.push(rec);
     save(); closeModal(); drawInput();
     toast(`${at >= 0 ? "Fragment updated" : "Fragment saved"}: ${rec.cards.length} card${rec.cards.length === 1 ? "" : "s"}, ${FACTIONS[v.faction]} (${state.fragments.length} in all)`);
   };
@@ -327,6 +369,6 @@ function makeDeckDialog() {
     if (!v.name) { $("#dn").focus(); return toast("Give the deck a nickname"); }
     state.decks.push({ id: uid(), name: v.name, faction: v.faction, archetype: v.archetype.trim(), type: v.type.trim(),
       cards: ids.slice(0, DECK_SIZE), saved: true, updated: Date.now() });
-    save(); closeModal(); drawInput(); toast(`Saved “${v.name}” to your decks`);
+    save(); closeModal(); drawInput(); toast(`Saved deck “${v.name}”`);
   };
 }

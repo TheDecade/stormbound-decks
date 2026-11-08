@@ -18,3 +18,15 @@ iPad-friendly web app to save Stormbound decklists while you play. Open it in Sa
   marked as a guess. The checkbox **Guess a deck when none fits** switches it off. It only uses the fragments saved on this device.
 - **Export for PC** shares or downloads one file with all saved decks and all fragments; on the PC,
   `python scripts/import_ipad_decks.py` in the Stormbound project reads it (decks to `data/decks`, fragments to `data/fragments`).
+- **Deck types met** (button on the deck list): guesses the type of deck of each opponent from the cards seen in the game, with
+  `archetypes.js` (a port of the Stormbound project's `stormbound/archetypes.py`; `tests/test_archetypes_parity.py` there runs both on
+  the same cases). The types are weighted card profiles (`archetypes-bundled.json`, made from the files in the project's
+  `data/decks/archetypes` by `scripts/export_ipad_decks.py`; the placeholder example is left out, so with no real profile the page says so).
+  Tabs: **Types** (faction, archetype and type shares with 90% credible ranges and the number of games each rests on; a type is shown only
+  with 3 games' worth of probability), **Games** (one verdict per game), **Matchups** (my deck against opponent faction / archetype / type,
+  win rate with a 90% range). Visibility is not corrected yet: a card only shows once it is played.
+- **My decks:** a deck marked "A deck I play" (or created with **+ My deck**) is listed under My decks, not among the decks met, and is
+  not a candidate for the opponent. Tap ○ to choose the deck you play now (remembered); Battle tools has the same choice on top.
+  **New game** asks Won / Lost / Skip (no draws); the result is saved with the deck's name and a copy of its list, on the game's
+  fragment (made if the game has cards and a faction) or, otherwise, as a game record. **Export for PC** carries `result`, `my_deck`
+  and `my_cards` on each fragment, and the PC importer saves them.
