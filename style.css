@@ -1,7 +1,7 @@
 :root{
   --bg:#14182b;--panel:#1d2340;--panel2:#262d52;--line:#333b66;--text:#eef0fb;--muted:#9aa3cc;
   --accent:#e8b84a;--danger:#e5586b;--ok:#4cc38a;
-  --winter:#5cc8ee;--ironclad:#4f86ee;--shadowfen:#52b86a;--swarm:#b565d9;
+  --winter:#5b7fc0;--ironclad:#c4585c;--shadowfen:#3f9486;--swarm:#9a7144;
   --safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
